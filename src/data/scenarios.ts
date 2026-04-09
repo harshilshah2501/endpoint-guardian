@@ -96,9 +96,11 @@ export function generateSnapshot(scenario: ScenarioKey): EndpointSnapshot {
       snap.memory.pressure = "warning";
       snap.memory.available_mb = 1800;
       snap.memory.swap_usage_mb = 2400;
+      snap.disk.free_pct = 4.5;
+      snap.disk.free_gb = 10.8;
       snap.battery.thermal_throttle = true;
       snap.top_processes = [
-        { pid: 3001, name: "docker", cpu_pct: 55, rss_mb: 3200, is_user: true, runtime_sec: 18000 },
+        { pid: 3001, name: "docker", cpu_pct: 88, rss_mb: 5500, is_user: true, runtime_sec: 18000 },
         { pid: 3002, name: "node", cpu_pct: 22, rss_mb: 1800, is_user: true, runtime_sec: 7200 },
         ...snap.top_processes,
       ];
