@@ -73,6 +73,7 @@ export function DiagnosisView({ result }: Props) {
                     <p className="text-sm font-medium">{result.priority_action}</p>
                   </div>
                 </div>
+              )}
               {/* ML Anomaly Score */}
               {result.mlAugmented && result.anomalyScore && (
                 <div className="mt-3 flex items-start gap-2 bg-violet-500/5 rounded-lg p-3 border border-violet-500/20">
@@ -99,7 +100,7 @@ export function DiagnosisView({ result }: Props) {
                   </div>
                 </div>
               )}
-              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
