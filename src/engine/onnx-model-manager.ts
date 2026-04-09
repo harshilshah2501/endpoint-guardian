@@ -1,33 +1,62 @@
 /**
- * ONNX Model Manager — loads and runs ONNX models for local ML inference.
- * 
- * Models are loaded from the /models/ directory (bundled with the app).
- * Uses onnxruntime-web with WASM backend for cross-platform compatibility.
+ * Multi-Model ONNX Manager — loads and manages multiple ONNX models
+ * with lazy-loading and auto-unload for minimal memory footprint.
  */
 
 import * as ort from "onnxruntime-web";
 import type { EndpointSnapshot } from "@/types/endpoint";
 
-// Configure ONNX Runtime to use WASM backend (works in both browser and Electron)
 ort.env.wasm.numThreads = 1;
-// Vite will serve these from public/ in dev, and from dist/ in production
 ort.env.wasm.wasmPaths = "./";
 
-export interface OnnxModelInfo {
-  name: string;
-  version: string;
-  inputShape: number[];
-  outputShape: number[];
-  loaded: boolean;
-}
+export type ModelName = "anomaly_clf" | "causal_ranker" | "remediation_selector";
 
 export interface AnomalyScore {
-  score: number;           // 0-1, higher = more anomalous
-  category: string;        // "normal" | "warning" | "critical"
-  featureImportance: Record<string, number>; // which features contributed most
+  score: number;
+  category: string;
+  featureImportance: Record<string, number>;
 }
 
-// Feature extraction: convert snapshot to a normalized float array
+export interface AnomalyClfOutput {
+  classProbs: Float32Array;       // [4]: healthy, degraded, warning, critical
+  anomalyScores: Float32Array;    // [12]: per-feature anomaly score
+  healthClass: string;
+  confidence: number;
+}
+
+export interface CausalRankerOutput {
+  causalMatrix: Float32Array;     // [12×12]: causal adjacency
+  attentionWeights: Float32Array; // [12×12]: raw attention
+  causalEdges: { source: string; target: string; strength: number }[];
+}
+
+export interface RemediationOutput {
+  actionScores: Float32Array;     // [8]: per-action confidence
+  tierProbs: Float32Array;        // [8×3]: tier probabilities per action
+  rankedActions: { action: string; score: number; tier: string; tierConfidence: number }[];
+}
+
+const FEATURE_NAMES = [
+  "cpu_1m", "cpu_5m", "cpu_temp", "mem_used_pct", "mem_pressure",
+  "swap_usage", "disk_used_pct", "dns_fail", "gateway_fail",
+  "internet_fail", "crash_rate", "thermal_throttle",
+];
+
+const REMEDIATION_ACTIONS = [
+  "kill_process", "clear_cache", "restart_service", "flush_dns",
+  "update_system", "reduce_startup", "free_disk", "investigate_logs",
+];
+
+const TIER_NAMES = ["diagnostic", "basic", "advanced"];
+
+const MODEL_PATHS: Record<ModelName, string> = {
+  anomaly_clf: "./models/anomaly_clf.onnx",
+  causal_ranker: "./models/causal_ranker.onnx",
+  remediation_selector: "./models/remediation_selector.onnx",
+};
+
+const IDLE_TIMEOUT_MS = 60_000;
+
 export function extractFeatures(snapshot: EndpointSnapshot): Float32Array {
   const totalMem = snapshot.memory.total_mb || 1;
   const totalDisk = snapshot.disk.total_gb || 1;
@@ -49,107 +78,199 @@ export function extractFeatures(snapshot: EndpointSnapshot): Float32Array {
   return features;
 }
 
-const FEATURE_NAMES = [
-  "cpu_1m", "cpu_5m", "cpu_temp", "mem_used_pct", "mem_pressure",
-  "swap_usage", "disk_used_pct", "dns_fail", "gateway_fail",
-  "internet_fail", "crash_rate", "thermal_throttle",
-];
+interface ModelSlot {
+  session: ort.InferenceSession | null;
+  loading: boolean;
+  error: string | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+}
 
-class OnnxModelManager {
-  private session: ort.InferenceSession | null = null;
-  private _loaded = false;
-  private _loading = false;
-  private _error: string | null = null;
-  private _modelInfo: OnnxModelInfo | null = null;
+class MultiModelManager {
+  private slots: Record<ModelName, ModelSlot> = {
+    anomaly_clf: { session: null, loading: false, error: null, idleTimer: null },
+    causal_ranker: { session: null, loading: false, error: null, idleTimer: null },
+    remediation_selector: { session: null, loading: false, error: null, idleTimer: null },
+  };
 
-  get loaded() { return this._loaded; }
-  get loading() { return this._loading; }
-  get error() { return this._error; }
-  get modelInfo() { return this._modelInfo; }
+  isLoaded(name: ModelName): boolean {
+    return this.slots[name].session !== null;
+  }
 
-  /**
-   * Load the anomaly detection ONNX model.
-   * Call this once at app startup.
-   */
-  async loadModel(modelPath = "./models/anomaly_detector.onnx"): Promise<boolean> {
-    if (this._loaded || this._loading) return this._loaded;
-    this._loading = true;
-    this._error = null;
+  isLoading(name: ModelName): boolean {
+    return this.slots[name].loading;
+  }
+
+  getError(name: ModelName): string | null {
+    return this.slots[name].error;
+  }
+
+  get anyLoaded(): boolean {
+    return Object.values(this.slots).some(s => s.session !== null);
+  }
+
+  private resetIdleTimer(name: ModelName) {
+    const slot = this.slots[name];
+    if (slot.idleTimer) clearTimeout(slot.idleTimer);
+    slot.idleTimer = setTimeout(() => this.unload(name), IDLE_TIMEOUT_MS);
+  }
+
+  async load(name: ModelName): Promise<boolean> {
+    const slot = this.slots[name];
+    if (slot.session) { this.resetIdleTimer(name); return true; }
+    if (slot.loading) return false;
+
+    slot.loading = true;
+    slot.error = null;
 
     try {
-      this.session = await ort.InferenceSession.create(modelPath, {
+      slot.session = await ort.InferenceSession.create(MODEL_PATHS[name], {
         executionProviders: ["wasm"],
         graphOptimizationLevel: "all",
       });
-
-      this._modelInfo = {
-        name: "EndpointDoctor Anomaly Detector",
-        version: "1.0.0",
-        inputShape: [1, 12],
-        outputShape: [1, 3],
-        loaded: true,
-      };
-      this._loaded = true;
-      console.log("[ONNX] Model loaded successfully");
+      console.log(`[ONNX] ${name} loaded`);
+      this.resetIdleTimer(name);
       return true;
     } catch (e) {
-      this._error = e instanceof Error ? e.message : "Failed to load ONNX model";
-      console.warn("[ONNX] Model load failed (falling back to rules-only):", this._error);
+      slot.error = e instanceof Error ? e.message : `Failed to load ${name}`;
+      console.warn(`[ONNX] ${name} load failed:`, slot.error);
       return false;
     } finally {
-      this._loading = false;
+      slot.loading = false;
     }
   }
 
-  /**
-   * Run anomaly detection on a snapshot.
-   * Returns anomaly scores and feature importance.
-   */
-  async predict(snapshot: EndpointSnapshot): Promise<AnomalyScore | null> {
-    if (!this.session || !this._loaded) return null;
+  async unload(name: ModelName) {
+    const slot = this.slots[name];
+    if (slot.session) {
+      await slot.session.release();
+      slot.session = null;
+      if (slot.idleTimer) clearTimeout(slot.idleTimer);
+      slot.idleTimer = null;
+      console.log(`[ONNX] ${name} unloaded (idle)`);
+    }
+  }
+
+  async unloadAll() {
+    for (const name of Object.keys(this.slots) as ModelName[]) {
+      await this.unload(name);
+    }
+  }
+
+  async runAnomalyClf(snapshot: EndpointSnapshot): Promise<AnomalyClfOutput | null> {
+    if (!(await this.load("anomaly_clf"))) return null;
+    const session = this.slots.anomaly_clf.session!;
+    this.resetIdleTimer("anomaly_clf");
 
     try {
       const features = extractFeatures(snapshot);
-      const inputTensor = new ort.Tensor("float32", features, [1, 12]);
-      const results = await this.session.run({ input: inputTensor });
+      // Reshape to [1, 12, 1]
+      const input = new ort.Tensor("float32", features, [1, 12, 1]);
+      const results = await session.run({ input });
 
-      // Output: [normal_prob, warning_prob, critical_prob]
-      const output = results.output.data as Float32Array;
-      const probs = Array.from(output);
+      const classProbs = results.class_probs.data as Float32Array;
+      const anomalyScores = results.anomaly_scores.data as Float32Array;
 
-      // Determine category from highest probability
-      const maxIdx = probs.indexOf(Math.max(...probs));
-      const categories = ["normal", "warning", "critical"] as const;
-      const category = categories[maxIdx];
+      const classes = ["healthy", "degraded", "warning", "critical"];
+      const maxIdx = Array.from(classProbs).indexOf(Math.max(...Array.from(classProbs)));
 
-      // Anomaly score: weighted combination (0 = normal, 1 = critical)
-      const score = probs[1] * 0.5 + probs[2] * 1.0;
-
-      // Feature importance: use absolute feature values as a proxy
-      const featureImportance: Record<string, number> = {};
-      for (let i = 0; i < FEATURE_NAMES.length; i++) {
-        featureImportance[FEATURE_NAMES[i]] = features[i];
-      }
-
-      return { score: Math.min(score, 1.0), category, featureImportance };
+      return {
+        classProbs,
+        anomalyScores,
+        healthClass: classes[maxIdx],
+        confidence: classProbs[maxIdx],
+      };
     } catch (e) {
-      console.error("[ONNX] Inference failed:", e);
+      console.error("[ONNX] anomaly_clf inference failed:", e);
       return null;
     }
   }
 
-  /**
-   * Dispose of the model session to free memory.
-   */
-  async dispose() {
-    if (this.session) {
-      await this.session.release();
-      this.session = null;
-      this._loaded = false;
-      this._modelInfo = null;
+  async runCausalRanker(snapshot: EndpointSnapshot): Promise<CausalRankerOutput | null> {
+    if (!(await this.load("causal_ranker"))) return null;
+    const session = this.slots.causal_ranker.session!;
+    this.resetIdleTimer("causal_ranker");
+
+    try {
+      const features = extractFeatures(snapshot);
+      const input = new ort.Tensor("float32", features, [1, 12, 1]);
+      const results = await session.run({ input });
+
+      const causalMatrix = results.causal_matrix.data as Float32Array;
+      const attentionWeights = results.attention_weights.data as Float32Array;
+
+      // Extract significant causal edges (strength > 0.3)
+      const causalEdges: CausalRankerOutput["causalEdges"] = [];
+      for (let i = 0; i < 12; i++) {
+        for (let j = 0; j < 12; j++) {
+          if (i === j) continue;
+          const strength = causalMatrix[i * 12 + j];
+          if (strength > 0.3 && features[i] > 0.3) {
+            causalEdges.push({
+              source: FEATURE_NAMES[i],
+              target: FEATURE_NAMES[j],
+              strength,
+            });
+          }
+        }
+      }
+
+      causalEdges.sort((a, b) => b.strength - a.strength);
+
+      return { causalMatrix, attentionWeights, causalEdges: causalEdges.slice(0, 10) };
+    } catch (e) {
+      console.error("[ONNX] causal_ranker inference failed:", e);
+      return null;
     }
+  }
+
+  async runRemediationSelector(snapshot: EndpointSnapshot): Promise<RemediationOutput | null> {
+    if (!(await this.load("remediation_selector"))) return null;
+    const session = this.slots.remediation_selector.session!;
+    this.resetIdleTimer("remediation_selector");
+
+    try {
+      const features = extractFeatures(snapshot);
+      const input = new ort.Tensor("float32", features, [1, 12, 1]);
+      const results = await session.run({ input });
+
+      const actionScores = results.action_scores.data as Float32Array;
+      const tierProbs = results.tier_probs.data as Float32Array;
+
+      const rankedActions: RemediationOutput["rankedActions"] = [];
+      for (let i = 0; i < REMEDIATION_ACTIONS.length; i++) {
+        const score = actionScores[i];
+        if (score > 0.2) {
+          const tierSlice = Array.from(tierProbs.slice(i * 3, i * 3 + 3));
+          const tierIdx = tierSlice.indexOf(Math.max(...tierSlice));
+          rankedActions.push({
+            action: REMEDIATION_ACTIONS[i],
+            score,
+            tier: TIER_NAMES[tierIdx],
+            tierConfidence: tierSlice[tierIdx],
+          });
+        }
+      }
+
+      rankedActions.sort((a, b) => b.score - a.score);
+
+      return { actionScores, tierProbs, rankedActions };
+    } catch (e) {
+      console.error("[ONNX] remediation_selector inference failed:", e);
+      return null;
+    }
+  }
+
+  getStatus(): Record<ModelName, { loaded: boolean; loading: boolean; error: string | null }> {
+    const result = {} as ReturnType<typeof this.getStatus>;
+    for (const [name, slot] of Object.entries(this.slots)) {
+      result[name as ModelName] = {
+        loaded: slot.session !== null,
+        loading: slot.loading,
+        error: slot.error,
+      };
+    }
+    return result;
   }
 }
 
-// Singleton instance
-export const modelManager = new OnnxModelManager();
+export const modelManager = new MultiModelManager();
