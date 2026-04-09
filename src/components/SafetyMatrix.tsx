@@ -5,38 +5,42 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  CheckCircle, AlertTriangle, Brain, XCircle, Shield, Lock, ArrowRight,
+  CheckCircle, AlertTriangle, Brain, XCircle, Shield, Lock, ArrowRight, Search, UserCheck, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const categoryConfig = {
-  "auto-safe": {
-    label: "Safe Auto-Fix",
-    icon: CheckCircle,
-    color: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
-    description: "Reversible, low-risk, no data loss",
-    gate: "Auto-execute (with audit log)",
-  },
-  approval: {
-    label: "Approval Required",
-    icon: AlertTriangle,
-    color: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-    description: "Moderate risk, may interrupt workflow",
-    gate: "User or admin consent required",
-  },
-  recommendation: {
-    label: "Recommendation Only",
-    icon: Brain,
+const tierConfig = {
+  diagnostic: {
+    label: "Tier 1 — Diagnostic",
+    shortLabel: "Diagnostic",
+    icon: Search,
     color: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
-    description: "High risk, irreversible, or requires judgment",
-    gate: "Display recommendation, never execute",
+    description: "Read-only investigation & debug. Zero system changes.",
+    gate: "Always automatic — no confirmation needed",
+  },
+  basic: {
+    label: "Tier 2 — Basic",
+    shortLabel: "Basic",
+    icon: UserCheck,
+    color: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+    description: "Trivial commands that require human confirmation before execution.",
+    gate: "User must approve — shows command, risk, and rollback plan",
+  },
+  advanced: {
+    label: "Tier 3 — Advanced",
+    shortLabel: "Advanced",
+    icon: Zap,
+    color: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+    description: "Autonomous safe actions. Reversible or zero data-loss risk.",
+    gate: "Auto-execute with notification + undo option",
   },
   never: {
-    label: "Never Auto-Fix",
+    label: "Never",
+    shortLabel: "Never",
     icon: XCircle,
     color: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
-    description: "Could cause data loss or system instability",
-    gate: "Explicitly blocked in code",
+    description: "Could cause data loss or system instability. Explicitly blocked.",
+    gate: "Blocked in code — cannot be executed",
   },
 };
 
@@ -49,11 +53,11 @@ const rollbackColors = {
 export function SafetyMatrix() {
   return (
     <div className="space-y-8">
-      {/* Category overview */}
+      {/* Tier overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {(Object.entries(categoryConfig) as [keyof typeof categoryConfig, typeof categoryConfig[keyof typeof categoryConfig]][]).map(([key, cfg]) => {
+        {(Object.entries(tierConfig) as [keyof typeof tierConfig, typeof tierConfig[keyof typeof tierConfig]][]).map(([key, cfg]) => {
           const Icon = cfg.icon;
-          const count = safetyActions.filter((a) => a.category === key).length;
+          const count = safetyActions.filter((a) => a.tier === key).length;
           return (
             <Card key={key} className="relative overflow-hidden">
               <CardContent className="p-4">
@@ -83,16 +87,16 @@ export function SafetyMatrix() {
             <TableHeader>
               <TableRow>
                 <TableHead>Action</TableHead>
-                <TableHead>Category</TableHead>
+                <TableHead>Tier</TableHead>
                 <TableHead className="hidden md:table-cell">macOS</TableHead>
                 <TableHead className="hidden md:table-cell">Windows</TableHead>
                 <TableHead>Rollback</TableHead>
-                <TableHead className="hidden lg:table-cell">Strategy</TableHead>
+                <TableHead className="hidden lg:table-cell">Lifecycle</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {safetyActions.map((action) => {
-                const cfg = categoryConfig[action.category];
+                const cfg = tierConfig[action.tier];
                 const Icon = cfg.icon;
                 return (
                   <TableRow key={action.action}>
@@ -104,7 +108,7 @@ export function SafetyMatrix() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={cn("text-[10px]", cfg.color)}>
-                        <Icon className="w-3 h-3 mr-0.5" /> {cfg.label}
+                        <Icon className="w-3 h-3 mr-0.5" /> {cfg.shortLabel}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-xs font-mono">{action.macPrivilege}</TableCell>
@@ -114,7 +118,13 @@ export function SafetyMatrix() {
                         {action.rollbackPossible === "yes" ? "✓ Yes" : action.rollbackPossible === "partial" ? "⚠ Partial" : "✗ No"}
                       </span>
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{action.rollbackStrategy}</TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      <div className="text-[10px] text-muted-foreground space-y-0.5">
+                        {action.preCheck && <div>Pre: {action.preCheck}</div>}
+                        {action.postCheck && <div>Post: {action.postCheck}</div>}
+                        {!action.preCheck && !action.postCheck && <div>{action.rollbackStrategy}</div>}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -146,7 +156,7 @@ export function SafetyMatrix() {
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">User Consent Flow</CardTitle>
+              <CardTitle className="text-base">Three-Tier Consent Flow</CardTitle>
             </CardHeader>
             <CardContent>
               <ol className="space-y-2">

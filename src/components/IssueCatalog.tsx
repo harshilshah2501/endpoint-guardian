@@ -12,18 +12,25 @@ const iconMap: Record<string, React.ElementType> = {
   Cpu, MemoryStick, HardDrive, Gauge, Timer, Bug, Wifi, RefreshCw, Download, Battery,
 };
 
-const safetyColors: Record<string, string> = {
-  "auto-safe": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
-  "approval": "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-  "recommendation": "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
+const tierColors: Record<string, string> = {
+  "diagnostic": "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
+  "basic": "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+  "advanced": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
   "never": "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
 };
 
-const safetyIcons: Record<string, React.ElementType> = {
-  "auto-safe": CheckCircle,
-  "approval": AlertTriangle,
-  "recommendation": Brain,
+const tierIcons: Record<string, React.ElementType> = {
+  "diagnostic": Brain,
+  "basic": AlertTriangle,
+  "advanced": CheckCircle,
   "never": XCircle,
+};
+
+const tierLabels: Record<string, string> = {
+  "diagnostic": "Diagnostic",
+  "basic": "Basic",
+  "advanced": "Advanced",
+  "never": "Never",
 };
 
 export function IssueCatalog() {
@@ -140,11 +147,11 @@ export function IssueCatalog() {
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Remediation Actions</h4>
                   <div className="space-y-2">
                     {issue.remediations.map((r) => {
-                      const SafeIcon = safetyIcons[r.safety];
+                      const TierIcon = tierIcons[r.tier];
                       return (
                         <div key={r.action} className="flex items-center gap-2">
-                          <Badge variant="outline" className={cn("text-[10px] shrink-0 w-28 justify-center", safetyColors[r.safety])}>
-                            <SafeIcon className="w-3 h-3 mr-1" /> {r.safety}
+                          <Badge variant="outline" className={cn("text-[10px] shrink-0 w-28 justify-center", tierColors[r.tier])}>
+                            <TierIcon className="w-3 h-3 mr-1" /> {tierLabels[r.tier]}
                           </Badge>
                           <span className="text-sm">{r.action}</span>
                         </div>

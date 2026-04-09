@@ -1,12 +1,15 @@
-import type { DiagnosisResult } from "@/types/endpoint";
+import type { DiagnosisResult, ActionTier } from "@/types/endpoint";
 import type { AnomalyScore } from "@/engine/onnx-model-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity, ChevronDown, ChevronUp, Brain,
+  CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity,
+  ChevronDown, ChevronUp, Brain, Search, UserCheck, Play, Undo2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface Props {
   result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore };
@@ -32,21 +35,75 @@ const severityColors = {
   info: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
 };
 
-const safetyColors = {
-  auto_safe: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  approval_required: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  recommendation_only: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-};
-
-const safetyLabels = {
-  auto_safe: "Auto-safe",
-  approval_required: "Needs Approval",
-  recommendation_only: "Recommendation",
+const tierConfig: Record<ActionTier, {
+  label: string;
+  icon: typeof Search;
+  color: string;
+  bgColor: string;
+  description: string;
+}> = {
+  diagnostic: {
+    label: "Diagnostic",
+    icon: Search,
+    color: "text-blue-700 dark:text-blue-400",
+    bgColor: "bg-blue-500/10 border-blue-500/20",
+    description: "Read-only debug — no system changes",
+  },
+  basic: {
+    label: "Basic",
+    icon: UserCheck,
+    color: "text-amber-700 dark:text-amber-400",
+    bgColor: "bg-amber-500/10 border-amber-500/20",
+    description: "Requires your confirmation",
+  },
+  advanced: {
+    label: "Advanced",
+    icon: Zap,
+    color: "text-emerald-700 dark:text-emerald-400",
+    bgColor: "bg-emerald-500/10 border-emerald-500/20",
+    description: "Auto-safe — executes autonomously",
+  },
 };
 
 export function DiagnosisView({ result }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
+  const [executedActions, setExecutedActions] = useState<Set<string>>(new Set());
   const HealthIcon = healthIcons[result.overall_health] || Activity;
+
+  const handleAutoExecute = (actionKey: string, action: string) => {
+    setExecutedActions(prev => new Set(prev).add(actionKey));
+    toast.success(`Auto-executed: ${action}`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          setExecutedActions(prev => {
+            const next = new Set(prev);
+            next.delete(actionKey);
+            return next;
+          });
+          toast.info(`Rolled back: ${action}`);
+        },
+      },
+    });
+  };
+
+  const handleApprove = (actionKey: string, action: string) => {
+    setExecutedActions(prev => new Set(prev).add(actionKey));
+    toast.success(`Approved & executed: ${action}`);
+  };
+
+  // Group remediations by tier
+  const groupByTier = (remediations: DiagnosisResult["diagnoses"][0]["remediations"]) => {
+    const groups: Record<ActionTier, typeof remediations> = {
+      diagnostic: [],
+      basic: [],
+      advanced: [],
+    };
+    remediations.forEach(r => {
+      if (r.tier in groups) groups[r.tier].push(r);
+    });
+    return groups;
+  };
 
   return (
     <div className="space-y-4">
@@ -108,6 +165,8 @@ export function DiagnosisView({ result }: Props) {
       {/* Individual diagnoses */}
       {result.diagnoses.map((diag, i) => {
         const expanded = expandedIdx === i;
+        const tierGroups = groupByTier(diag.remediations);
+
         return (
           <Card
             key={i}
@@ -152,30 +211,78 @@ export function DiagnosisView({ result }: Props) {
                   </div>
                 )}
 
-                {/* Remediations */}
+                {/* Tiered Remediation Actions */}
                 {diag.remediations?.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                       <Shield className="w-3 h-3" /> Remediation Actions
                     </h4>
-                    <div className="space-y-2">
-                      {diag.remediations.map((rem, j) => (
-                        <div key={j} className="border rounded-lg p-3 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <Badge className={cn("text-[10px]", safetyColors[rem.safety_level])}>
-                              {safetyLabels[rem.safety_level] || rem.safety_level}
-                            </Badge>
-                            <span className="text-sm font-medium">{rem.action}</span>
+
+                    {(["advanced", "basic", "diagnostic"] as ActionTier[]).map(tier => {
+                      const actions = tierGroups[tier];
+                      if (actions.length === 0) return null;
+                      const cfg = tierConfig[tier];
+                      const TierIcon = cfg.icon;
+
+                      return (
+                        <div key={tier} className={cn("border rounded-lg overflow-hidden", cfg.bgColor)}>
+                          <div className="px-3 py-2 flex items-center gap-2 border-b border-inherit">
+                            <TierIcon className={cn("w-3.5 h-3.5", cfg.color)} />
+                            <span className={cn("text-xs font-semibold", cfg.color)}>{cfg.label}</span>
+                            <span className="text-[10px] text-muted-foreground">— {cfg.description}</span>
                           </div>
-                          {rem.command_hint && (
-                            <code className="block text-xs font-mono bg-muted/50 rounded px-2 py-1 text-muted-foreground">{rem.command_hint}</code>
-                          )}
-                          {rem.risk && (
-                            <p className="text-xs text-muted-foreground"><span className="text-amber-500">Risk:</span> {rem.risk}</p>
-                          )}
+                          <div className="p-2 space-y-2">
+                            {actions.map((rem, j) => {
+                              const actionKey = `${i}-${tier}-${j}`;
+                              const executed = executedActions.has(actionKey);
+
+                              return (
+                                <div key={j} className={cn("bg-background/80 rounded-lg p-3 space-y-2", executed && "opacity-60")}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-medium flex-1">{rem.action}</span>
+                                    {/* Tier-specific buttons */}
+                                    {tier === "advanced" && !executed && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-xs h-7 gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                                        onClick={() => handleAutoExecute(actionKey, rem.action)}
+                                      >
+                                        <Play className="w-3 h-3" /> Auto-Run
+                                      </Button>
+                                    )}
+                                    {tier === "basic" && !executed && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-xs h-7 gap-1 border-amber-500/30 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                                        onClick={() => handleApprove(actionKey, rem.action)}
+                                      >
+                                        <UserCheck className="w-3 h-3" /> Approve
+                                      </Button>
+                                    )}
+                                    {executed && (
+                                      <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                                        <CheckCircle className="w-3 h-3 mr-1" /> Done
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {rem.command_hint && (
+                                    <code className="block text-xs font-mono bg-muted/50 rounded px-2 py-1 text-muted-foreground">{rem.command_hint}</code>
+                                  )}
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+                                    {rem.risk && <span><span className="text-amber-500 font-medium">Risk:</span> {rem.risk}</span>}
+                                    {rem.pre_check && <span><span className="text-blue-500 font-medium">Pre:</span> {rem.pre_check}</span>}
+                                    {rem.post_check && <span><span className="text-emerald-500 font-medium">Post:</span> {rem.post_check}</span>}
+                                    {rem.rollback && <span><span className="text-violet-500 font-medium">Rollback:</span> {rem.rollback}</span>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
                 )}
 
