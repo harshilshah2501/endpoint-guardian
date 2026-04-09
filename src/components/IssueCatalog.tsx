@@ -39,17 +39,17 @@ export function IssueCatalog() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 mb-6">
-        <Badge variant="outline" className={safetyColors["auto-safe"]}>
-          <CheckCircle className="w-3 h-3 mr-1" /> Auto-safe
+        <Badge variant="outline" className={tierColors["diagnostic"]}>
+          <Brain className="w-3 h-3 mr-1" /> Tier 1: Diagnostic
         </Badge>
-        <Badge variant="outline" className={safetyColors["approval"]}>
-          <AlertTriangle className="w-3 h-3 mr-1" /> Approval Required
+        <Badge variant="outline" className={tierColors["basic"]}>
+          <AlertTriangle className="w-3 h-3 mr-1" /> Tier 2: Basic
         </Badge>
-        <Badge variant="outline" className={safetyColors["recommendation"]}>
-          <Brain className="w-3 h-3 mr-1" /> Recommendation Only
+        <Badge variant="outline" className={tierColors["advanced"]}>
+          <CheckCircle className="w-3 h-3 mr-1" /> Tier 3: Advanced
         </Badge>
-        <Badge variant="outline" className={safetyColors["never"]}>
-          <XCircle className="w-3 h-3 mr-1" /> Never Auto-fix
+        <Badge variant="outline" className={tierColors["never"]}>
+          <XCircle className="w-3 h-3 mr-1" /> Never
         </Badge>
       </div>
 
