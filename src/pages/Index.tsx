@@ -21,11 +21,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 const Index = () => {
-  const [activeScenario, setActiveScenario] = useState<ScenarioKey>("high_cpu");
+  const [activeScenario, setActiveScenario] = useState<ScenarioKey | "live">("high_cpu");
   const [customJson, setCustomJson] = useState("");
   const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
+  const [isScanning, setIsScanning] = useState(false);
   const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
   const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
+  const isElectron = useMemo(() => isElectronApp(), []);
 
   const handleScenarioSelect = (key: ScenarioKey) => {
     setActiveScenario(key);
