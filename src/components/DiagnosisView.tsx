@@ -1,18 +1,25 @@
 import type { DiagnosisResult, ActionTier } from "@/types/endpoint";
-import type { AnomalyScore } from "@/engine/onnx-model-manager";
+import type { AnomalyClfOutput, CausalRankerOutput, RemediationOutput } from "@/engine/onnx-model-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity,
   ChevronDown, ChevronUp, Brain, Search, UserCheck, Play, Undo2,
+  Cpu, ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
 
 interface Props {
-  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore; aiPowered?: boolean };
+  result: DiagnosisResult & {
+    transformerPowered?: boolean;
+    anomalyClf?: AnomalyClfOutput;
+    causalRanker?: CausalRankerOutput;
+    remediationSelector?: RemediationOutput;
+    aiPowered?: boolean;
+  };
 }
 
 const healthColors = {
@@ -92,7 +99,6 @@ export function DiagnosisView({ result }: Props) {
     toast.success(`Approved & executed: ${action}`);
   };
 
-  // Group remediations by tier
   const groupByTier = (remediations: DiagnosisResult["diagnoses"][0]["remediations"]) => {
     const groups: Record<ActionTier, typeof remediations> = {
       diagnostic: [],
@@ -113,14 +119,19 @@ export function DiagnosisView({ result }: Props) {
           <div className="flex items-start gap-3">
             <HealthIcon className="w-6 h-6 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <h3 className="font-bold text-base">
                   Overall: {result.overall_health.charAt(0).toUpperCase() + result.overall_health.slice(1)}
                 </h3>
                 <Badge variant="outline" className={healthColors[result.overall_health]}>
                   {result.diagnoses.length} issue{result.diagnoses.length !== 1 ? "s" : ""} found
                 </Badge>
-                {result.aiPowered && (
+                {result.transformerPowered && (
+                  <Badge variant="outline" className="text-[10px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/30">
+                    <Cpu className="w-3 h-3 mr-1" /> Transformer-Powered
+                  </Badge>
+                )}
+                {result.aiPowered && !result.transformerPowered && (
                   <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30">
                     <Brain className="w-3 h-3 mr-1" /> AI-Powered
                   </Badge>
@@ -136,29 +147,95 @@ export function DiagnosisView({ result }: Props) {
                   </div>
                 </div>
               )}
-              {/* ML Anomaly Score */}
-              {result.mlAugmented && result.anomalyScore && (
-                <div className="mt-3 flex items-start gap-2 bg-violet-500/5 rounded-lg p-3 border border-violet-500/20">
-                  <Brain className="w-4 h-4 text-violet-500 mt-0.5 shrink-0" />
-                  <div className="flex-1">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">ML Anomaly Score</span>
-                    <div className="flex items-center gap-3 mt-1">
-                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={cn("h-full rounded-full transition-all", 
-                            result.anomalyScore.score > 0.7 ? "bg-red-500" : 
-                            result.anomalyScore.score > 0.3 ? "bg-amber-500" : "bg-emerald-500"
-                          )}
-                          style={{ width: `${result.anomalyScore.score * 100}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-mono font-bold">
-                        {(result.anomalyScore.score * 100).toFixed(0)}%
-                      </span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {result.anomalyScore.category}
-                      </Badge>
+
+              {/* Transformer Anomaly Classification */}
+              {result.anomalyClf && (
+                <div className="mt-3 bg-cyan-500/5 rounded-lg p-3 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Cpu className="w-4 h-4 text-cyan-500 shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transformer Anomaly Classification</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1.5">
+                      {["healthy", "degraded", "warning", "critical"].map((cls, i) => {
+                        const prob = result.anomalyClf!.classProbs[i];
+                        const isMax = cls === result.anomalyClf!.healthClass;
+                        return (
+                          <div key={cls} className={cn(
+                            "text-center px-2 py-1 rounded text-[10px] border",
+                            isMax ? "bg-foreground/10 border-foreground/20 font-bold" : "bg-muted/30 border-transparent"
+                          )}>
+                            <div className="capitalize">{cls}</div>
+                            <div className="font-mono">{(prob * 100).toFixed(0)}%</div>
+                          </div>
+                        );
+                      })}
                     </div>
+                  </div>
+                  {/* Per-feature anomaly scores */}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {["cpu_1m", "cpu_5m", "cpu_temp", "mem", "mem_p", "swap", "disk", "dns", "gw", "inet", "crash", "thermal"].map((label, i) => {
+                      const score = result.anomalyClf!.anomalyScores[i];
+                      return (
+                        <span key={label} className={cn(
+                          "text-[9px] font-mono px-1.5 py-0.5 rounded",
+                          score > 0.7 ? "bg-red-500/15 text-red-600" :
+                          score > 0.4 ? "bg-amber-500/15 text-amber-600" :
+                          "bg-muted/30 text-muted-foreground"
+                        )}>
+                          {label}:{(score * 100).toFixed(0)}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Causal Chain Visualization */}
+              {result.causalRanker && result.causalRanker.causalEdges.length > 0 && (
+                <div className="mt-3 bg-violet-500/5 rounded-lg p-3 border border-violet-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Causal Chain Analysis</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {result.causalRanker.causalEdges.slice(0, 5).map((edge, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs">
+                        <code className="font-mono text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded">{edge.source}</code>
+                        <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                        <code className="font-mono text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded">{edge.target}</code>
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-full",
+                              edge.strength > 0.7 ? "bg-red-500" : edge.strength > 0.5 ? "bg-amber-500" : "bg-blue-500"
+                            )}
+                            style={{ width: `${edge.strength * 100}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-muted-foreground">{(edge.strength * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ML Remediation Suggestions */}
+              {result.remediationSelector && result.remediationSelector.rankedActions.length > 0 && (
+                <div className="mt-3 bg-emerald-500/5 rounded-lg p-3 border border-emerald-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">ML-Ranked Actions</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.remediationSelector.rankedActions.slice(0, 5).map((action, i) => (
+                      <Badge key={i} variant="outline" className={cn("text-[10px]",
+                        action.tier === "advanced" ? "border-emerald-500/30 text-emerald-600" :
+                        action.tier === "basic" ? "border-amber-500/30 text-amber-600" :
+                        "border-blue-500/30 text-blue-600"
+                      )}>
+                        {action.action.replace(/_/g, " ")} ({(action.score * 100).toFixed(0)}%)
+                      </Badge>
+                    ))}
                   </div>
                 </div>
               )}
@@ -198,7 +275,6 @@ export function DiagnosisView({ result }: Props) {
               <CardContent className="px-4 pb-4 pt-0 space-y-4" onClick={e => e.stopPropagation()}>
                 <p className="text-sm leading-relaxed">{diag.explanation}</p>
 
-                {/* Contributing signals */}
                 {diag.contributing_signals?.length > 0 && (
                   <div>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Contributing Signals</h4>
@@ -216,7 +292,6 @@ export function DiagnosisView({ result }: Props) {
                   </div>
                 )}
 
-                {/* Tiered Remediation Actions */}
                 {diag.remediations?.length > 0 && (
                   <div className="space-y-3">
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -245,7 +320,6 @@ export function DiagnosisView({ result }: Props) {
                                 <div key={j} className={cn("bg-background/80 rounded-lg p-3 space-y-2", executed && "opacity-60")}>
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="text-sm font-medium flex-1">{rem.action}</span>
-                                    {/* Tier-specific buttons */}
                                     {tier === "advanced" && !executed && (
                                       <Button
                                         size="sm"
@@ -291,7 +365,6 @@ export function DiagnosisView({ result }: Props) {
                   </div>
                 )}
 
-                {/* Post verification */}
                 {diag.post_verification && (
                   <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
                     <h4 className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mb-1">Post-fix Verification</h4>
