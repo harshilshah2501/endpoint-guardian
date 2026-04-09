@@ -11,12 +11,14 @@ import { DiagnosisView } from "@/components/DiagnosisView";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
 import { getEngineInfo } from "@/engine/local-inference";
 import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios";
+import { isElectronApp, collectLiveTelemetry } from "@/engine/electron-telemetry";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 const Index = () => {
   const [activeScenario, setActiveScenario] = useState<ScenarioKey>("high_cpu");
