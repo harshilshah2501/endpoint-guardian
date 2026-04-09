@@ -38,6 +38,21 @@ const Index = () => {
     }
   };
 
+  const handleLiveScan = async () => {
+    setActiveScenario("live");
+    setIsScanning(true);
+    clearResult();
+    try {
+      const liveSnap = await collectLiveTelemetry();
+      setSnapshot(liveSnap);
+      toast.success("Live telemetry collected from this machine");
+    } catch (err) {
+      toast.error("Live scan failed: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleCustomApply = () => {
     try {
       const parsed = JSON.parse(customJson);
