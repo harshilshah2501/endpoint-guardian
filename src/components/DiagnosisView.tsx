@@ -12,7 +12,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 interface Props {
-  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore };
+  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore; aiPowered?: boolean };
 }
 
 const healthColors = {
@@ -120,6 +120,11 @@ export function DiagnosisView({ result }: Props) {
                 <Badge variant="outline" className={healthColors[result.overall_health]}>
                   {result.diagnoses.length} issue{result.diagnoses.length !== 1 ? "s" : ""} found
                 </Badge>
+                {result.aiPowered && (
+                  <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30">
+                    <Brain className="w-3 h-3 mr-1" /> AI-Powered
+                  </Badge>
+                )}
               </div>
               <p className="text-sm leading-relaxed">{result.summary}</p>
               {result.priority_action && (
