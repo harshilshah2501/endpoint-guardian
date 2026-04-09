@@ -12,7 +12,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 interface Props {
-  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore };
+  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore; aiPowered?: boolean };
 }
 
 const healthColors = {
