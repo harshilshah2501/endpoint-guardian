@@ -12,7 +12,7 @@ export interface IssueDetail {
   approachJustification: string;
   safetyLevel: string;
   decisionLogic: string;
-  remediations: { action: string; safety: "auto-safe" | "approval" | "recommendation" | "never" }[];
+  remediations: { action: string; tier: "diagnostic" | "basic" | "advanced" | "never" }[];
   postFixVerification: string;
   mlNotes?: string;
 }
@@ -30,23 +30,23 @@ export const issues: IssueDetail[] = [
     suggestedModel: "Gradient-boosted tree",
     approach: "Rules + stats",
     approachJustification: "Threshold + top-process is sufficient. A GBT classifier for 'repeat offender' detection is Phase 3.",
-    safetyLevel: "Auto-fix safe (user process) / Approval (system process)",
+    safetyLevel: "Basic (user process) / Diagnostic (system process)",
     decisionLogic: `IF cpu_usage_avg_5m > 85%:
   top_offenders = get_top_processes(sort=cpu, limit=5)
   FOR each offender:
     IF offender.is_user_process AND offender.cpu > 90% AND offender.duration > 2min:
       → DIAGNOSE: runaway user process
-      → REMEDIATE: offer to kill (auto-safe)
+      → REMEDIATE: offer to kill (basic — needs confirmation)
     IF offender.is_system_process:
       → DIAGNOSE: system process high CPU
-      → REMEDIATE: recommend restart (approval required)
+      → REMEDIATE: investigate logs (diagnostic)
     IF offender.name IN known_indexers:
       → DIAGNOSE: indexing spike
-      → REMEDIATE: wait + explain (recommendation only)`,
+      → REMEDIATE: wait + explain (diagnostic)`,
     remediations: [
-      { action: "Kill runaway user process", safety: "auto-safe" },
-      { action: "Suggest restarting system service", safety: "approval" },
-      { action: "Explain known-benign spikes (indexing, updates)", safety: "recommendation" },
+      { action: "Kill runaway user process", tier: "basic" },
+      { action: "Investigate system process logs", tier: "diagnostic" },
+      { action: "Explain known-benign spikes (indexing, updates)", tier: "diagnostic" },
     ],
     postFixVerification: "Re-sample cpu_usage_avg_1m after 30s. Confirm < 70%.",
   },
@@ -62,21 +62,18 @@ export const issues: IssueDetail[] = [
     suggestedModel: "Rules only",
     approach: "Rules only",
     approachJustification: "Purely threshold-based.",
-    safetyLevel: "Auto-fix safe (suggest close) / Approval (kill)",
+    safetyLevel: "Diagnostic (suggest close) / Basic (kill)",
     decisionLogic: `IF memory_pressure = critical:
   top_consumers = get_top_processes(sort=rss, limit=5)
   IF any consumer.rss > 50% of total_ram AND consumer.is_user_process:
     → DIAGNOSE: memory hog (user app)
-    → REMEDIATE: suggest close / kill with approval
-  IF total_open_apps > threshold:
-    → DIAGNOSE: too many apps open
-    → REMEDIATE: list largest, suggest closing
+    → REMEDIATE: kill with user confirmation (basic)
   IF swap_usage > 4GB AND physical_ram < 8GB:
     → DIAGNOSE: insufficient RAM for workload
-    → REMEDIATE: recommendation only (upgrade RAM / reduce load)`,
+    → REMEDIATE: recommendation (diagnostic)`,
     remediations: [
-      { action: "Suggest closing heavy apps", safety: "recommendation" },
-      { action: "Kill memory-hogging user process", safety: "approval" },
+      { action: "Suggest closing heavy apps", tier: "diagnostic" },
+      { action: "Kill memory-hogging user process", tier: "basic" },
     ],
     postFixVerification: "Re-check memory_pressure and swap_usage.",
   },
@@ -92,21 +89,17 @@ export const issues: IssueDetail[] = [
     suggestedModel: "Rules only",
     approach: "Rules only",
     approachJustification: "Enumeration + size calculation. Zero ML value.",
-    safetyLevel: "Auto-fix safe (clear caches/trash)",
+    safetyLevel: "Advanced (clear caches/trash) / Basic (delete files)",
     decisionLogic: `cache_size = sum(browser caches, system caches, package caches)
 trash_size = get_trash_size()
-log_size = get_log_dir_size()
-large_downloads = find_files(~/Downloads, size > 500MB, age > 30d)
 
-IF trash_size > 1GB → REMEDIATE: empty trash (auto-safe)
-IF cache_size > 2GB → REMEDIATE: clear caches (auto-safe, selective)
-IF log_size > 1GB → REMEDIATE: rotate/clear old logs (auto-safe)
-IF large_downloads exist → REMEDIATE: list and suggest deletion (approval)`,
+IF trash_size > 1GB → REMEDIATE: empty trash (advanced — auto-safe)
+IF cache_size > 2GB → REMEDIATE: clear caches (advanced — auto-safe)
+IF large_downloads exist → REMEDIATE: list and suggest deletion (basic)`,
     remediations: [
-      { action: "Empty trash", safety: "auto-safe" },
-      { action: "Clear browser/system caches", safety: "auto-safe" },
-      { action: "Rotate old logs", safety: "auto-safe" },
-      { action: "Suggest deleting large old downloads", safety: "approval" },
+      { action: "Empty trash", tier: "advanced" },
+      { action: "Clear browser/system caches", tier: "advanced" },
+      { action: "Suggest deleting large old downloads", tier: "basic" },
     ],
     postFixVerification: "Re-check disk_free_pct.",
   },
@@ -122,19 +115,17 @@ IF large_downloads exist → REMEDIATE: list and suggest deletion (approval)`,
     suggestedModel: "Time-series anomaly detection",
     approach: "Rules + optional anomaly detection",
     approachJustification: "SMART prediction benefits from time-series anomaly detection, but only with historical data (Phase 2+).",
-    safetyLevel: "Approval required",
+    safetyLevel: "Diagnostic (investigate) / Basic (schedule defrag)",
     decisionLogic: `IF smart_status = failing:
   → DIAGNOSE: disk hardware degradation
-  → REMEDIATE: URGENT backup recommendation (never auto-fix)
+  → REMEDIATE: URGENT backup recommendation (diagnostic)
 IF heavy_writer_process exists:
   → DIAGNOSE: process saturating disk
-  → REMEDIATE: identify + recommend throttle (approval)
-IF disk_fragmentation high (HDD only):
-  → REMEDIATE: schedule defrag (approval, Windows only)`,
+  → REMEDIATE: identify + wait for completion (diagnostic)`,
     remediations: [
-      { action: "Urgent backup recommendation", safety: "never" },
-      { action: "Identify disk-saturating process", safety: "approval" },
-      { action: "Schedule defrag (Windows HDD)", safety: "approval" },
+      { action: "Urgent backup recommendation", tier: "diagnostic" },
+      { action: "Identify disk-saturating process", tier: "diagnostic" },
+      { action: "Schedule defrag (Windows HDD)", tier: "basic" },
     ],
     postFixVerification: "Re-check disk_queue_depth and disk_await_ms.",
   },
@@ -150,16 +141,14 @@ IF disk_fragmentation high (HDD only):
     suggestedModel: "Rules only",
     approach: "Rules only",
     approachJustification: "List + count. No ML value.",
-    safetyLevel: "Approval required",
+    safetyLevel: "Basic (disable startup items)",
     decisionLogic: `startup_items = list_startup_items()
 IF startup_items.count > 15:
   → DIAGNOSE: excessive startup items
-  → REMEDIATE: list with impact, suggest disabling (approval)
-IF any startup_item.known_unnecessary:
-  → REMEDIATE: suggest disabling specific items (approval)`,
+  → REMEDIATE: list with impact, suggest disabling (basic)`,
     remediations: [
-      { action: "List startup items with impact scores", safety: "recommendation" },
-      { action: "Disable unnecessary startup items", safety: "approval" },
+      { action: "List startup items with impact scores", tier: "diagnostic" },
+      { action: "Disable unnecessary startup items", tier: "basic" },
     ],
     postFixVerification: "Measure next boot_time_sec.",
   },
@@ -174,24 +163,22 @@ IF any startup_item.known_unnecessary:
     modelUseful: true,
     suggestedModel: "Tiny transformer (text classifier)",
     approach: "Rules + tiny text classifier ⭐",
-    approachJustification: "Best ML use case. Crash log signature clustering and matching. A distilled BERT (3-5MB) or TF-IDF + logistic regression.",
-    safetyLevel: "Recommendation only",
+    approachJustification: "Best ML use case. Crash log signature clustering and matching.",
+    safetyLevel: "Diagnostic (analyze) / Basic (reinstall)",
     decisionLogic: `crash_logs = collect_recent_crash_reports(app)
 IF crash_signature matches known_patterns:
-  → DIAGNOSE: known issue (incompatible plugin, corrupt prefs)
-  → REMEDIATE: specific fix (approval)
+  → DIAGNOSE: known issue
+  → REMEDIATE: specific fix (basic — needs confirmation)
 IF crash_count > 5 in 24h:
   → DIAGNOSE: unstable app
-  → REMEDIATE: suggest reinstall / update (recommendation)
-IF hung_process.duration > 60s:
-  → REMEDIATE: offer force-quit (auto-safe for user apps)`,
+  → REMEDIATE: suggest reinstall (diagnostic)`,
     remediations: [
-      { action: "Force-quit hung user app", safety: "auto-safe" },
-      { action: "Suggest reinstall / update", safety: "recommendation" },
-      { action: "Apply known fix for crash pattern", safety: "approval" },
+      { action: "Analyze crash log signatures", tier: "diagnostic" },
+      { action: "Suggest reinstall / update", tier: "diagnostic" },
+      { action: "Apply known fix for crash pattern", tier: "basic" },
     ],
     postFixVerification: "Monitor crash_count_24h for recurrence.",
-    mlNotes: "A tiny text classifier on crash log signatures can cluster unknown crashes and match to known resolution patterns. This is the strongest ML use case.",
+    mlNotes: "A tiny text classifier on crash log signatures can cluster unknown crashes and match to known resolution patterns.",
   },
   {
     id: 7,
@@ -204,21 +191,22 @@ IF hung_process.duration > 60s:
     modelUseful: false,
     suggestedModel: "Rules only",
     approach: "Rules only",
-    approachJustification: "Sequential diagnostic tree. Completely deterministic. No ML can improve on 'ping the gateway.'",
-    safetyLevel: "Auto-fix safe (flush DNS, renew DHCP)",
-    decisionLogic: `1. Check: is network interface up?
-   NO → DIAGNOSE: interface down → enable (auto-safe)
-2. Check: is gateway reachable?
-   NO → DIAGNOSE: local network issue → reconnect WiFi/Ethernet
-3. Check: is DNS resolving?
-   NO → DIAGNOSE: DNS failure → flush DNS cache (auto-safe)
-4. Check: is internet reachable?
-   NO → DIAGNOSE: upstream/firewall issue → recommendation only
-5. All pass → DIAGNOSE: intermittent / resolved`,
+    approachJustification: "Sequential diagnostic tree. Completely deterministic.",
+    safetyLevel: "Advanced (flush DNS, toggle WiFi) / Basic (change DNS server)",
+    decisionLogic: `1. Check: gateway reachable?
+   NO → DIAGNOSE: local network issue
+   → REMEDIATE: toggle WiFi (advanced — auto-safe)
+2. Check: DNS resolving?
+   NO → DIAGNOSE: DNS failure
+   → REMEDIATE: flush DNS cache (advanced — auto-safe)
+3. Check: internet reachable?
+   NO → DIAGNOSE: upstream/firewall issue
+   → REMEDIATE: investigation only (diagnostic)`,
     remediations: [
-      { action: "Flush DNS cache", safety: "auto-safe" },
-      { action: "Renew DHCP lease", safety: "auto-safe" },
-      { action: "Suggest reconnect WiFi/Ethernet", safety: "recommendation" },
+      { action: "Flush DNS cache", tier: "advanced" },
+      { action: "Toggle WiFi", tier: "advanced" },
+      { action: "Change DNS server", tier: "basic" },
+      { action: "Investigate firewall/proxy settings", tier: "diagnostic" },
     ],
     postFixVerification: "Re-run sequential diagnostic tree.",
   },
@@ -234,16 +222,15 @@ IF hung_process.duration > 60s:
     suggestedModel: "Rules only",
     approach: "Rules only",
     approachJustification: "Exit code + log matching. Boolean checks.",
-    safetyLevel: "Auto-fix safe (restart) / Approval (re-register)",
+    safetyLevel: "Advanced (restart stopped) / Diagnostic (investigate loop)",
     decisionLogic: `IF service.status = stopped AND service.expected = running:
-  → REMEDIATE: restart service (auto-safe, up to 2 retries)
+  → REMEDIATE: restart service (advanced — auto-safe, max 2 retries)
 IF service.restart_count_1h > 3:
   → DIAGNOSE: restart loop
-  → check exit_code, stderr, logs
-  → REMEDIATE: recommendation (do not keep restarting)`,
+  → REMEDIATE: investigate logs (diagnostic — do not keep restarting)`,
     remediations: [
-      { action: "Restart stopped service (max 2 retries)", safety: "auto-safe" },
-      { action: "Investigate restart loop root cause", safety: "recommendation" },
+      { action: "Restart stopped service (max 2 retries)", tier: "advanced" },
+      { action: "Investigate restart loop root cause", tier: "diagnostic" },
     ],
     postFixVerification: "Verify service_status = running after 30s.",
   },
@@ -259,22 +246,17 @@ IF service.restart_count_1h > 3:
     suggestedModel: "Rules only",
     approach: "Rules only",
     approachJustification: "Error code matching.",
-    safetyLevel: "Approval required",
+    safetyLevel: "Basic (apply updates)",
     decisionLogic: `IF pending_updates.age > 14d:
-  → REMEDIATE: recommend applying updates (approval)
-IF update_error in log:
-  → DIAGNOSE: update failure
-  → parse error code → match known fixes
-  → REMEDIATE: specific fix (approval) or escalate
+  → REMEDIATE: apply updates (basic — needs confirmation)
 IF symptoms started within 24h of last_update:
-  → DIAGNOSE: possible update-related regression
-  → REMEDIATE: recommend rollback / contact IT`,
+  → DIAGNOSE: possible update regression
+  → REMEDIATE: recommend rollback (diagnostic)`,
     remediations: [
-      { action: "Recommend applying pending updates", safety: "approval" },
-      { action: "Apply known fix for update error", safety: "approval" },
-      { action: "Recommend rollback / contact IT", safety: "recommendation" },
+      { action: "Apply pending updates", tier: "basic" },
+      { action: "Recommend rollback / contact IT", tier: "diagnostic" },
     ],
-    postFixVerification: "Re-check pending_update_count and update_error_log.",
+    postFixVerification: "Re-check pending_update_count.",
   },
   {
     id: 10,
@@ -287,21 +269,18 @@ IF symptoms started within 24h of last_update:
     modelUseful: true,
     suggestedModel: "Time-series regression",
     approach: "Rules + optional time-series",
-    approachJustification: "Battery degradation trend prediction (Phase 3). Linear regression may suffice.",
-    safetyLevel: "Recommendation only",
+    approachJustification: "Battery degradation trend prediction (Phase 3).",
+    safetyLevel: "Diagnostic (all recommendations)",
     decisionLogic: `IF thermal_throttle = active:
   → check top CPU processes → same as Issue #1
 IF battery_health < 80%:
   → DIAGNOSE: battery degradation
-  → REMEDIATE: recommendation (service battery)
-IF battery_drain_rate abnormally high:
-  → check energy-hungry processes
-  → REMEDIATE: identify + suggest close (recommendation)`,
+  → REMEDIATE: recommendation (diagnostic)`,
     remediations: [
-      { action: "Identify energy-hungry processes", safety: "recommendation" },
-      { action: "Recommend battery service", safety: "recommendation" },
+      { action: "Identify energy-hungry processes", tier: "diagnostic" },
+      { action: "Recommend battery service", tier: "diagnostic" },
     ],
     postFixVerification: "Monitor cpu_temp and battery_drain_rate over next hour.",
-    mlNotes: "Trend-based battery degradation prediction (time-series regression on battery_health over weeks/months). Not critical for MVP.",
+    mlNotes: "Trend-based battery degradation prediction. Not critical for MVP.",
   },
 ];

@@ -1,17 +1,10 @@
-import type { EndpointSnapshot, DiagnosisResult } from "@/types/endpoint";
+import type { EndpointSnapshot, DiagnosisResult, Remediation } from "@/types/endpoint";
 
 interface Signal {
   field: string;
   value: string;
   threshold: string;
   note: string;
-}
-
-interface Remediation {
-  action: string;
-  safety_level: "auto_safe" | "approval_required" | "recommendation_only";
-  command_hint?: string;
-  risk: string;
 }
 
 interface Diagnosis {
@@ -56,27 +49,37 @@ function detectHighCpu(s: EndpointSnapshot): Diagnosis | null {
       : "This may be a temporary intensive operation.";
     signals.push({ field: "top_process.cpu_pct", value: `${topOffender.cpu_pct}%`, threshold: "< 50%", note: `${topOffender.name} is the primary consumer` });
 
+    // Basic tier: needs human confirmation to kill
     remediations.push({
       action: `Terminate ${topOffender.name} (PID ${topOffender.pid})`,
-      safety_level: "approval_required",
+      tier: "basic",
       command_hint: s.os === "macos" ? `kill -15 ${topOffender.pid}` : `taskkill /PID ${topOffender.pid}`,
       risk: `Will close ${topOffender.name}. Unsaved work may be lost.`,
+      pre_check: `Verify ${topOffender.name} is still running and consuming high CPU`,
+      post_check: "Re-check cpu.usage_avg_1m after 30 seconds. Expect < 50%.",
+      rollback: `User can relaunch ${topOffender.name}`,
     });
   }
 
   if (isIndexing) {
+    // Diagnostic tier: just informational
     remediations.push({
-      action: "Wait for indexing to complete — this is normal after updates or large file changes",
-      safety_level: "recommendation_only",
+      action: "Indexing in progress — this is normal after updates or large file changes",
+      tier: "diagnostic",
       risk: "None — indexing is a normal system process",
+      pre_check: "Check indexer process CPU and duration",
+      post_check: "Verify indexer completes within expected timeframe",
     });
   }
 
   if (systemOffender && !isIndexing) {
+    // Diagnostic tier: investigate only
     remediations.push({
       action: `Investigate system process: ${systemOffender.name}`,
-      safety_level: "recommendation_only",
+      tier: "diagnostic",
       risk: "System processes may be essential — do not kill without understanding",
+      pre_check: `Check ${systemOffender.name} logs and dependencies`,
+      post_check: "Review process behavior after investigation",
     });
   }
 
@@ -118,16 +121,19 @@ function detectHighMemory(s: EndpointSnapshot): Diagnosis | null {
     explanation += `${memHog.name} is consuming ${memHog.rss_mb}MB (${((memHog.rss_mb / s.memory.total_mb) * 100).toFixed(0)}% of total RAM).`;
     remediations.push({
       action: `Close or restart ${memHog.name} to reclaim ${memHog.rss_mb}MB`,
-      safety_level: "approval_required",
+      tier: "basic",
       command_hint: s.os === "macos" ? `kill -15 ${memHog.pid}` : `taskkill /PID ${memHog.pid}`,
       risk: `Will close ${memHog.name}. Save work first.`,
+      pre_check: `Verify ${memHog.name} memory usage is still elevated`,
+      post_check: "Re-check memory.pressure and available_mb after 30 seconds",
+      rollback: `Relaunch ${memHog.name}`,
     });
   }
   if (s.memory.swap_usage_mb > 4000 && s.memory.total_mb < 8192) {
     explanation += " System RAM may be insufficient for current workload.";
     remediations.push({
       action: "Consider upgrading RAM or reducing concurrent applications",
-      safety_level: "recommendation_only",
+      tier: "diagnostic",
       risk: "None — informational recommendation",
     });
   }
@@ -152,9 +158,31 @@ function detectLowDisk(s: EndpointSnapshot): Diagnosis | null {
   ];
 
   const remediations: Remediation[] = [
-    { action: "Empty trash / recycle bin", safety_level: "auto_safe", command_hint: s.os === "macos" ? "rm -rf ~/.Trash/*" : "Clear-RecycleBin -Force", risk: "Permanently deletes trashed files" },
-    { action: "Clear browser and system caches", safety_level: "auto_safe", risk: "Caches will rebuild. No data loss." },
-    { action: "Review and remove large files in Downloads folder", safety_level: "approval_required", risk: "User should verify files before deletion" },
+    {
+      action: "Clear browser and system caches",
+      tier: "advanced",
+      risk: "Caches will rebuild. No data loss.",
+      pre_check: "Estimate total cache size before clearing",
+      post_check: "Verify disk space increased after clearing",
+      rollback: "Caches rebuild automatically on next use",
+    },
+    {
+      action: "Empty trash / recycle bin",
+      tier: "advanced",
+      command_hint: s.os === "macos" ? "rm -rf ~/.Trash/*" : "Clear-RecycleBin -Force",
+      risk: "Permanently deletes trashed files — already marked for deletion by user",
+      pre_check: "List trash contents and total size",
+      post_check: "Verify disk.free_pct increased",
+      rollback: "Cannot undo — files were already in trash",
+    },
+    {
+      action: "Review and remove large files in Downloads folder",
+      tier: "basic",
+      risk: "User should verify files before deletion",
+      pre_check: "Scan Downloads for files > 500MB older than 30 days",
+      post_check: "Re-check disk.free_pct after cleanup",
+      rollback: "Cannot undo file deletion",
+    },
   ];
 
   return {
@@ -184,8 +212,21 @@ function detectNetworkDns(s: EndpointSnapshot): Diagnosis | null {
     severity = "critical";
     signals.push({ field: "network.gateway_reachable", value: "false", threshold: "true", note: "No local network connectivity" });
     remediations.push(
-      { action: "Check WiFi/Ethernet connection", safety_level: "recommendation_only", risk: "None" },
-      { action: "Toggle WiFi off and back on", safety_level: "auto_safe", risk: "Brief network interruption" },
+      {
+        action: "Check WiFi/Ethernet connection",
+        tier: "diagnostic",
+        risk: "None",
+        pre_check: "Verify physical network adapter status",
+        post_check: "Re-ping gateway after reconnection",
+      },
+      {
+        action: "Toggle WiFi off and back on",
+        tier: "advanced",
+        risk: "Brief network interruption (~5 seconds)",
+        pre_check: "Check if WiFi adapter is present and enabled",
+        post_check: "Verify gateway is reachable after reconnection",
+        rollback: "WiFi can be toggled back on",
+      },
     );
   } else if (!s.network.dns_ok) {
     title = "DNS Resolution Failing";
@@ -193,14 +234,35 @@ function detectNetworkDns(s: EndpointSnapshot): Diagnosis | null {
     severity = "critical";
     signals.push({ field: "network.dns_ok", value: "false", threshold: "true", note: "DNS queries failing" });
     remediations.push(
-      { action: "Flush DNS cache", safety_level: "auto_safe", command_hint: s.os === "macos" ? "sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder" : "ipconfig /flushdns", risk: "None — cache rebuilds automatically" },
-      { action: "Try alternate DNS (8.8.8.8 or 1.1.1.1)", safety_level: "approval_required", risk: "Changes DNS resolution path" },
+      {
+        action: "Flush DNS cache",
+        tier: "advanced",
+        command_hint: s.os === "macos" ? "sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder" : "ipconfig /flushdns",
+        risk: "None — cache rebuilds automatically",
+        pre_check: "Verify DNS resolution is failing",
+        post_check: "Re-test DNS resolution after flush",
+        rollback: "DNS cache rebuilds automatically",
+      },
+      {
+        action: "Try alternate DNS (8.8.8.8 or 1.1.1.1)",
+        tier: "basic",
+        risk: "Changes DNS resolution path",
+        pre_check: "Test current DNS server response",
+        post_check: "Verify DNS resolution works with new server",
+        rollback: "Restore original DNS server settings",
+      },
     );
   } else if (!s.network.internet_reachable) {
     title = "Internet Unreachable";
     explanation = "Local network and DNS are working but internet is not reachable. This may indicate a firewall, proxy, or upstream provider issue.";
     signals.push({ field: "network.internet_reachable", value: "false", threshold: "true", note: "Cannot reach external hosts" });
-    remediations.push({ action: "Check firewall and proxy settings. Contact IT if on corporate network.", safety_level: "recommendation_only", risk: "None" });
+    remediations.push({
+      action: "Check firewall and proxy settings. Contact IT if on corporate network.",
+      tier: "diagnostic",
+      risk: "None",
+      pre_check: "Test connectivity to multiple external hosts",
+      post_check: "Re-run full network diagnostic tree",
+    });
   }
 
   return {
@@ -239,8 +301,21 @@ function detectCrashStorm(s: EndpointSnapshot): Diagnosis | null {
       : `${s.crashes.count_24h} application crashes detected in the last 24 hours across multiple apps.`,
     contributing_signals: signals,
     remediations: [
-      ...(topCrasher ? [{ action: `Reinstall or update ${topCrasher[0]}`, safety_level: "recommendation_only" as const, risk: "May need to reconfigure application settings" }] : []),
-      { action: "Check for OS updates that may fix compatibility issues", safety_level: "approval_required", risk: "Updates may require restart" },
+      ...(topCrasher ? [{
+        action: `Reinstall or update ${topCrasher[0]}`,
+        tier: "diagnostic" as const,
+        risk: "May need to reconfigure application settings",
+        pre_check: `Check ${topCrasher[0]} version and crash log signatures`,
+        post_check: "Monitor crashes.count_24h over the next 24 hours",
+      }] : []),
+      {
+        action: "Check for OS updates that may fix compatibility issues",
+        tier: "basic" as const,
+        risk: "Updates may require restart",
+        pre_check: "List pending OS and app updates",
+        post_check: "Verify crash frequency decreases after update",
+        rollback: "OS restore point / rollback update",
+      },
     ],
     post_verification: "Monitor crashes.count_24h over the next 24 hours.",
   };
@@ -265,7 +340,15 @@ function detectStartupSlow(s: EndpointSnapshot): Diagnosis | null {
     explanation: `Boot time is ${s.startup.boot_time_sec} seconds with ${s.startup.items_count} startup items. Reducing login items can significantly improve boot performance.`,
     contributing_signals: signals,
     remediations: [
-      { action: "Review and disable unnecessary startup items", safety_level: "approval_required", command_hint: s.os === "macos" ? "System Settings → General → Login Items" : "Task Manager → Startup tab", risk: "Some disabled items may need to be re-enabled if needed" },
+      {
+        action: "Review and disable unnecessary startup items",
+        tier: "basic",
+        command_hint: s.os === "macos" ? "System Settings → General → Login Items" : "Task Manager → Startup tab",
+        risk: "Some disabled items may need to be re-enabled if needed",
+        pre_check: "List all startup items with impact scores",
+        post_check: "Measure boot_time_sec on next restart",
+        rollback: "Re-enable disabled startup items",
+      },
     ],
     post_verification: "Measure boot_time_sec on next restart.",
   };
@@ -291,8 +374,22 @@ function detectServiceIssue(s: EndpointSnapshot): Diagnosis | null {
       : `${target.name} is not running but is expected to be active.`,
     contributing_signals: signals,
     remediations: looping
-      ? [{ action: `Investigate ${target.name} logs for root cause. Do not keep restarting.`, safety_level: "recommendation_only", risk: "None" }]
-      : [{ action: `Restart ${target.name}`, safety_level: "auto_safe", command_hint: s.os === "macos" ? `launchctl kickstart -k system/${target.name}` : `Restart-Service ${target.name}`, risk: "Brief service interruption" }],
+      ? [{
+          action: `Investigate ${target.name} logs for root cause. Do not keep restarting.`,
+          tier: "diagnostic",
+          risk: "None",
+          pre_check: `Collect ${target.name} stderr and exit codes from last 3 restarts`,
+          post_check: "Review logs for recurring error patterns",
+        }]
+      : [{
+          action: `Restart ${target.name}`,
+          tier: "advanced",
+          command_hint: s.os === "macos" ? `launchctl kickstart -k system/${target.name}` : `Restart-Service ${target.name}`,
+          risk: "Brief service interruption",
+          pre_check: `Verify ${target.name} is expected to be running`,
+          post_check: `Verify ${target.name} status = running after 30 seconds`,
+          rollback: `Stop ${target.name} if restart causes issues`,
+        }],
     post_verification: `Verify ${target.name} status = running after 30 seconds.`,
   };
 }
@@ -319,7 +416,15 @@ function detectUpdateIssue(s: EndpointSnapshot): Diagnosis | null {
     explanation: `There are ${s.updates.pending_count} pending system updates. The last successful update was ${Math.round(daysSinceUpdate)} days ago. Keeping the system updated is important for security and stability.`,
     contributing_signals: signals,
     remediations: [
-      { action: "Apply pending system updates", safety_level: "approval_required", command_hint: s.os === "macos" ? "softwareupdate -ia" : "Start-Process ms-settings:windowsupdate", risk: "May require restart. Some updates may change system behavior." },
+      {
+        action: "Apply pending system updates",
+        tier: "basic",
+        command_hint: s.os === "macos" ? "softwareupdate -ia" : "Start-Process ms-settings:windowsupdate",
+        risk: "May require restart. Some updates may change system behavior.",
+        pre_check: "List pending updates and their criticality",
+        post_check: "Re-check updates.pending_count after applying updates",
+        rollback: "OS restore point / rollback update",
+      },
     ],
     post_verification: "Re-check updates.pending_count after applying updates.",
   };
@@ -347,12 +452,28 @@ function detectThermalBattery(s: EndpointSnapshot): Diagnosis | null {
 
   if (tempHigh || throttling) {
     remediations.push(
-      { action: "Close resource-intensive applications to reduce heat", safety_level: "recommendation_only", risk: "None" },
-      { action: "Ensure adequate ventilation — remove from soft surfaces", safety_level: "recommendation_only", risk: "None" },
+      {
+        action: "Close resource-intensive applications to reduce heat",
+        tier: "diagnostic",
+        risk: "None",
+        pre_check: "Identify top CPU-consuming processes",
+        post_check: "Monitor cpu.temp_celsius over next 10 minutes",
+      },
+      {
+        action: "Ensure adequate ventilation — remove from soft surfaces",
+        tier: "diagnostic",
+        risk: "None",
+      },
     );
   }
   if (batteryDegraded) {
-    remediations.push({ action: "Battery service recommended — health below 80%", safety_level: "recommendation_only", risk: "Requires hardware service appointment" });
+    remediations.push({
+      action: "Battery service recommended — health below 80%",
+      tier: "diagnostic",
+      risk: "Requires hardware service appointment",
+      pre_check: "Confirm battery health reading and cycle count",
+      post_check: "Schedule service if health continues declining",
+    });
   }
 
   return {
@@ -372,7 +493,6 @@ function detectThermalBattery(s: EndpointSnapshot): Diagnosis | null {
 }
 
 function detectDiskIo(s: EndpointSnapshot): Diagnosis | null {
-  // Disk I/O signals aren't in our basic snapshot, but detect via process correlation
   const diskHeavy = s.top_processes.filter(p => p.cpu_pct > 20 && p.name.match(/backup|TimeMachine|Spotlight|mds|fsck|diskutil/i));
   if (diskHeavy.length === 0) return null;
 
@@ -386,7 +506,13 @@ function detectDiskIo(s: EndpointSnapshot): Diagnosis | null {
       { field: "process.name", value: diskHeavy[0].name, threshold: "N/A", note: "Known disk-intensive process" },
     ],
     remediations: [
-      { action: "Wait for the disk-intensive operation to complete", safety_level: "recommendation_only", risk: "Interrupting may cause data corruption" },
+      {
+        action: "Wait for the disk-intensive operation to complete",
+        tier: "diagnostic",
+        risk: "Interrupting may cause data corruption",
+        pre_check: "Identify which disk operation is in progress",
+        post_check: "Check if the disk-intensive process has completed",
+      },
     ],
     post_verification: "Check if the disk-intensive process has completed.",
   };
@@ -414,7 +540,6 @@ export function runLocalDiagnosis(snapshot: EndpointSnapshot): DiagnosisResult {
     if (result) diagnoses.push(result);
   }
 
-  // Sort by severity
   const severityOrder = { critical: 0, warning: 1, info: 2 };
   diagnoses.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
