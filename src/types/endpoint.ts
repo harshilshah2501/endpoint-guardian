@@ -64,6 +64,18 @@ export interface EndpointSnapshot {
   };
 }
 
+export type ActionTier = "diagnostic" | "basic" | "advanced";
+
+export interface Remediation {
+  action: string;
+  tier: ActionTier;
+  command_hint?: string;
+  risk: string;
+  pre_check?: string;
+  post_check?: string;
+  rollback?: string;
+}
+
 export interface DiagnosisResult {
   diagnoses: {
     issue_class: string;
@@ -77,12 +89,7 @@ export interface DiagnosisResult {
       threshold: string;
       note: string;
     }[];
-    remediations: {
-      action: string;
-      safety_level: "auto_safe" | "approval_required" | "recommendation_only";
-      command_hint?: string;
-      risk: string;
-    }[];
+    remediations: Remediation[];
     post_verification: string;
   }[];
   overall_health: "healthy" | "degraded" | "critical" | "unknown";
