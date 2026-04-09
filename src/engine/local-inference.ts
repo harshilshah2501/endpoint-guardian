@@ -1,68 +1,104 @@
 import type { EndpointSnapshot, DiagnosisResult } from "@/types/endpoint";
 import { runLocalDiagnosis } from "./rules-engine";
+import { modelManager, type AnomalyScore } from "./onnx-model-manager";
 
 /**
  * Local AI inference layer.
- * Phase 1: Pure deterministic rules engine (instant, zero dependencies).
- * Phase 2+: Will integrate ONNX models for crash classification & anomaly detection.
- *
- * This module provides the same DiagnosisResult interface as the cloud edge function,
- * but runs entirely locally with zero network calls.
+ * Phase 1: Deterministic rules engine (instant, zero dependencies).
+ * Phase 2: ONNX anomaly detection model augments rules engine.
  */
 
 export interface LocalInferenceOptions {
   mode: "quick" | "deep";
-  /** Future: enable ML model augmentation when available */
   useModels?: boolean;
+}
+
+let _modelLoadAttempted = false;
+
+/**
+ * Initialize ONNX models. Call once at app startup.
+ * Non-blocking — falls back to rules-only if model unavailable.
+ */
+export async function initModels(): Promise<boolean> {
+  if (_modelLoadAttempted) return modelManager.loaded;
+  _modelLoadAttempted = true;
+  return modelManager.loadModel("./models/anomaly_detector.onnx");
 }
 
 export async function runLocalInference(
   snapshot: EndpointSnapshot,
   options: LocalInferenceOptions = { mode: "quick" }
-): Promise<DiagnosisResult> {
+): Promise<DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore }> {
   // Phase 1: deterministic rules engine
   const result = runLocalDiagnosis(snapshot);
 
+  // Phase 2: ONNX model augmentation
+  let anomalyScore: AnomalyScore | null = null;
+  let mlAugmented = false;
+
+  if (options.useModels !== false && modelManager.loaded) {
+    anomalyScore = await modelManager.predict(snapshot);
+    if (anomalyScore) {
+      mlAugmented = true;
+
+      // ML can upgrade severity if it detects something rules missed
+      if (anomalyScore.category === "critical" && result.overall_health !== "critical") {
+        result.summary += ` [ML: anomaly score ${(anomalyScore.score * 100).toFixed(0)}% — model detects critical pattern]`;
+      }
+      if (anomalyScore.category === "warning" && result.overall_health === "healthy") {
+        result.summary += ` [ML: anomaly score ${(anomalyScore.score * 100).toFixed(0)}% — model detects potential issue]`;
+        result.overall_health = "degraded";
+      }
+    }
+  }
+
   if (options.mode === "deep") {
-    // Deep mode: add cross-correlation analysis
     result.summary = `[Deep Analysis] ${result.summary}`;
 
-    // Cross-correlate: high CPU + high temp = thermal cascade
     const hasCpu = result.diagnoses.some(d => d.issue_class === "high_cpu");
     const hasThermal = result.diagnoses.some(d => d.issue_class === "battery_thermal");
     if (hasCpu && hasThermal) {
       result.summary += " Cross-correlation: High CPU is likely causing thermal issues — resolving CPU should also resolve thermal throttling.";
     }
 
-    // Cross-correlate: low disk + crashes = possibly related
     const hasDisk = result.diagnoses.some(d => d.issue_class === "low_disk");
     const hasCrash = result.diagnoses.some(d => d.issue_class === "app_crash");
     if (hasDisk && hasCrash) {
       result.summary += " Cross-correlation: Low disk space may be contributing to application crashes.";
     }
+
+    if (anomalyScore) {
+      const topFeatures = Object.entries(anomalyScore.featureImportance)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`);
+      result.summary += ` Top ML signals: ${topFeatures.join(", ")}.`;
+    }
   }
 
-  return result;
+  return { ...result, mlAugmented, anomalyScore: anomalyScore ?? undefined };
 }
 
-/**
- * Check if ONNX models are available for enhanced inference.
- * Phase 1: Always returns false.
- * Phase 2+: Will check for local model files.
- */
 export function areModelsAvailable(): boolean {
-  return false;
+  return modelManager.loaded;
 }
 
-/**
- * Get engine info for display in UI.
- */
+export function getModelLoadError(): string | null {
+  return modelManager.error;
+}
+
 export function getEngineInfo() {
   return {
     name: "EndpointDoctor Local Engine",
-    version: "1.0.0",
-    mode: "Deterministic Rules Engine",
-    modelStatus: areModelsAvailable() ? "ONNX models loaded" : "Rules-only (no ML models)",
+    version: "1.1.0",
+    mode: modelManager.loaded ? "Rules Engine + ONNX ML" : "Deterministic Rules Engine",
+    modelStatus: modelManager.loaded
+      ? "ONNX model loaded (anomaly detection)"
+      : modelManager.loading
+        ? "Loading ONNX model..."
+        : modelManager.error
+          ? `Model unavailable: ${modelManager.error}`
+          : "Rules-only (no ML models)",
     issuesCovered: 10,
     capabilities: [
       "High CPU detection & process attribution",
@@ -75,6 +111,11 @@ export function getEngineInfo() {
       "Update status tracking",
       "Thermal/battery health assessment",
       "Disk I/O pattern detection",
+      ...(modelManager.loaded ? [
+        "ML anomaly detection (ONNX)",
+        "Feature importance analysis",
+        "Cross-signal pattern recognition",
+      ] : []),
     ],
   };
 }
