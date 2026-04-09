@@ -166,8 +166,33 @@ const Index = () => {
                 >
                   Custom JSON
                 </button>
+                {isElectron && (
+                  <button
+                    onClick={handleLiveScan}
+                    disabled={isScanning}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg border text-xs transition-all flex items-center gap-1.5 font-semibold",
+                      activeScenario === "live"
+                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                        : "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                    )}
+                  >
+                    {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <MonitorCheck className="w-3 h-3" />}
+                    {isScanning ? "Scanning..." : "⚡ Live Scan"}
+                  </button>
+                )}
+                {!isElectron && (
+                  <span className="px-3 py-1.5 rounded-lg border border-dashed border-muted-foreground/30 text-xs text-muted-foreground italic">
+                    Live Scan available in desktop app
+                  </span>
+                )}
               </div>
-              {activeScenario !== "custom" && (
+              {activeScenario === "live" && (
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
+                  🖥️ Real telemetry from {snapshot.hostname} ({snapshot.os} {snapshot.os_version})
+                </p>
+              )}
+              {activeScenario !== "custom" && activeScenario !== "live" && (
                 <p className="text-xs text-muted-foreground mt-2">
                   {scenarios.find(s => s.key === activeScenario)?.description}
                 </p>
