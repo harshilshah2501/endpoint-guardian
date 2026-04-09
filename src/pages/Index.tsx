@@ -22,8 +22,8 @@ const Index = () => {
   const [activeScenario, setActiveScenario] = useState<ScenarioKey>("high_cpu");
   const [customJson, setCustomJson] = useState("");
   const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
-  const { diagnose, isLoading, result, error, latencyMs, clearResult } = useDiagnosis();
-  const engineInfo = useMemo(() => getEngineInfo(), []);
+  const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
+  const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
 
   const handleScenarioSelect = (key: ScenarioKey) => {
     setActiveScenario(key);
@@ -68,6 +68,11 @@ const Index = () => {
               <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
                 <Cpu className="w-3 h-3 mr-1" /> Local Engine
               </Badge>
+              {modelsReady && (
+                <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/30">
+                  <Brain className="w-3 h-3 mr-1" /> ONNX ML
+                </Badge>
+              )}
             </div>
           </div>
         </div>
