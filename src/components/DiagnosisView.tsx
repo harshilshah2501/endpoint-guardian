@@ -1,14 +1,15 @@
 import type { DiagnosisResult } from "@/types/endpoint";
+import type { AnomalyScore } from "@/engine/onnx-model-manager";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity, ChevronDown, ChevronUp,
+  CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity, ChevronDown, ChevronUp, Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 interface Props {
-  result: DiagnosisResult;
+  result: DiagnosisResult & { mlAugmented?: boolean; anomalyScore?: AnomalyScore };
 }
 
 const healthColors = {
@@ -72,8 +73,33 @@ export function DiagnosisView({ result }: Props) {
                     <p className="text-sm font-medium">{result.priority_action}</p>
                   </div>
                 </div>
+              {/* ML Anomaly Score */}
+              {result.mlAugmented && result.anomalyScore && (
+                <div className="mt-3 flex items-start gap-2 bg-violet-500/5 rounded-lg p-3 border border-violet-500/20">
+                  <Brain className="w-4 h-4 text-violet-500 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">ML Anomaly Score</span>
+                    <div className="flex items-center gap-3 mt-1">
+                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", 
+                            result.anomalyScore.score > 0.7 ? "bg-red-500" : 
+                            result.anomalyScore.score > 0.3 ? "bg-amber-500" : "bg-emerald-500"
+                          )}
+                          style={{ width: `${result.anomalyScore.score * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-mono font-bold">
+                        {(result.anomalyScore.score * 100).toFixed(0)}%
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {result.anomalyScore.category}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
               )}
-            </div>
+              </div>
           </div>
         </CardContent>
       </Card>
