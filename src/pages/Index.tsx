@@ -9,10 +9,11 @@ import { Roadmap } from "@/components/Roadmap";
 import { SnapshotViewer } from "@/components/SnapshotViewer";
 import { DiagnosisView } from "@/components/DiagnosisView";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
+import { getEngineInfo } from "@/engine/local-inference";
 import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,7 +22,8 @@ const Index = () => {
   const [activeScenario, setActiveScenario] = useState<ScenarioKey>("high_cpu");
   const [customJson, setCustomJson] = useState("");
   const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
-  const { diagnose, isLoading, result, error, clearResult } = useDiagnosis();
+  const { diagnose, isLoading, result, error, latencyMs, clearResult } = useDiagnosis();
+  const engineInfo = useMemo(() => getEngineInfo(), []);
 
   const handleScenarioSelect = (key: ScenarioKey) => {
     setActiveScenario(key);
@@ -38,7 +40,7 @@ const Index = () => {
       setSnapshot(parsed);
       clearResult();
     } catch {
-      // invalid JSON handled by textarea
+      // invalid JSON
     }
   };
 
@@ -57,11 +59,16 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-lg font-bold tracking-tight">EndpointDoctor</h1>
-              <p className="text-[11px] text-muted-foreground">AI-Powered Endpoint Diagnostic Engine — MVP Dashboard</p>
+              <p className="text-[11px] text-muted-foreground">Edge AI Diagnostic Engine — Fully Local, Zero Cloud</p>
             </div>
-            <Badge variant="outline" className="ml-auto text-[10px] bg-primary/10 text-primary border-primary/30">
-              <Brain className="w-3 h-3 mr-1" /> AI-Enabled
-            </Badge>
+            <div className="ml-auto flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                <Wifi className="w-3 h-3 mr-1 line-through" /> Offline-Ready
+              </Badge>
+              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
+                <Cpu className="w-3 h-3 mr-1" /> Local Engine
+              </Badge>
+            </div>
           </div>
         </div>
       </header>
@@ -71,7 +78,7 @@ const Index = () => {
           <TabsList className="grid w-full grid-cols-4 max-w-xl">
             <TabsTrigger value="diagnose" className="flex items-center gap-1.5 text-xs">
               <Brain className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">AI Diagnosis</span>
+              <span className="hidden sm:inline">Diagnostics</span>
               <span className="sm:hidden">Diagnose</span>
             </TabsTrigger>
             <TabsTrigger value="issues" className="flex items-center gap-1.5 text-xs">
@@ -89,8 +96,21 @@ const Index = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* AI DIAGNOSIS TAB */}
+          {/* DIAGNOSTICS TAB */}
           <TabsContent value="diagnose" className="space-y-5">
+            {/* Engine info bar */}
+            <Card className="bg-muted/30">
+              <CardContent className="p-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+                <span className="font-medium">{engineInfo.name} v{engineInfo.version}</span>
+                <span className="text-muted-foreground">{engineInfo.mode}</span>
+                <span className="text-muted-foreground">{engineInfo.issuesCovered} issue classes</span>
+                <span className="text-muted-foreground">{engineInfo.modelStatus}</span>
+                {latencyMs !== null && (
+                  <span className="ml-auto font-mono text-emerald-600 dark:text-emerald-400">⚡ {latencyMs}ms</span>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Scenario selector */}
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
@@ -130,7 +150,7 @@ const Index = () => {
               )}
             </div>
 
-            {/* Custom JSON input */}
+            {/* Custom JSON */}
             {activeScenario === "custom" && (
               <Card>
                 <CardContent className="p-4 space-y-3">
@@ -158,7 +178,7 @@ const Index = () => {
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
                 Deep Analysis
               </Button>
-              {isLoading && <span className="text-xs text-muted-foreground animate-pulse">AI analyzing endpoint signals...</span>}
+              {isLoading && <span className="text-xs text-muted-foreground animate-pulse">Running local diagnostics...</span>}
             </div>
 
             {/* Error */}
