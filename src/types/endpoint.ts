@@ -17,7 +17,7 @@ export interface ServiceStatus {
 export interface EndpointSnapshot {
   timestamp: string;
   hostname: string;
-  os: "macos" | "windows";
+  os: "macos" | "windows" | "linux";
   os_version: string;
   agent_version: string;
   cpu: {

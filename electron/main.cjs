@@ -1,13 +1,17 @@
-const { app, BrowserWindow, protocol } = require("electron");
+const { app, BrowserWindow, protocol, ipcMain } = require("electron");
 const path = require("path");
-const fs = require("fs");
+const { collectSnapshot } = require("./telemetry.cjs");
 
 let mainWindow;
 
-// Register custom protocol for proper MIME type handling (especially .wasm)
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
+
+// IPC handler for live telemetry
+ipcMain.handle("collect-telemetry", async () => {
+  return await collectSnapshot();
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -20,10 +24,10 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
 
-  // Register protocol handler for serving files with correct MIME types
   protocol.registerFileProtocol("app", (request, callback) => {
     const url = request.url.replace("app://./", "");
     const filePath = path.join(__dirname, "..", "dist", url);

@@ -11,19 +11,23 @@ import { DiagnosisView } from "@/components/DiagnosisView";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
 import { getEngineInfo } from "@/engine/local-inference";
 import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios";
+import { isElectronApp, collectLiveTelemetry } from "@/engine/electron-telemetry";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 const Index = () => {
-  const [activeScenario, setActiveScenario] = useState<ScenarioKey>("high_cpu");
+  const [activeScenario, setActiveScenario] = useState<ScenarioKey | "live">("high_cpu");
   const [customJson, setCustomJson] = useState("");
   const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
+  const [isScanning, setIsScanning] = useState(false);
   const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
   const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
+  const isElectron = useMemo(() => isElectronApp(), []);
 
   const handleScenarioSelect = (key: ScenarioKey) => {
     setActiveScenario(key);
@@ -31,6 +35,21 @@ const Index = () => {
       const snap = generateSnapshot(key);
       setSnapshot(snap);
       clearResult();
+    }
+  };
+
+  const handleLiveScan = async () => {
+    setActiveScenario("live");
+    setIsScanning(true);
+    clearResult();
+    try {
+      const liveSnap = await collectLiveTelemetry();
+      setSnapshot(liveSnap);
+      toast.success("Live telemetry collected from this machine");
+    } catch (err) {
+      toast.error("Live scan failed: " + (err instanceof Error ? err.message : "Unknown error"));
+    } finally {
+      setIsScanning(false);
     }
   };
 
@@ -147,8 +166,33 @@ const Index = () => {
                 >
                   Custom JSON
                 </button>
+                {isElectron && (
+                  <button
+                    onClick={handleLiveScan}
+                    disabled={isScanning}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg border text-xs transition-all flex items-center gap-1.5 font-semibold",
+                      activeScenario === "live"
+                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                        : "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                    )}
+                  >
+                    {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <MonitorCheck className="w-3 h-3" />}
+                    {isScanning ? "Scanning..." : "⚡ Live Scan"}
+                  </button>
+                )}
+                {!isElectron && (
+                  <span className="px-3 py-1.5 rounded-lg border border-dashed border-muted-foreground/30 text-xs text-muted-foreground italic">
+                    Live Scan available in desktop app
+                  </span>
+                )}
               </div>
-              {activeScenario !== "custom" && (
+              {activeScenario === "live" && (
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
+                  🖥️ Real telemetry from {snapshot.hostname} ({snapshot.os} {snapshot.os_version})
+                </p>
+              )}
+              {activeScenario !== "custom" && activeScenario !== "live" && (
                 <p className="text-xs text-muted-foreground mt-2">
                   {scenarios.find(s => s.key === activeScenario)?.description}
                 </p>
