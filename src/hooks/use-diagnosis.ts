@@ -1,13 +1,10 @@
 import { useState, useEffect } from "react";
-import type { EndpointSnapshot, DiagnosisResult } from "@/types/endpoint";
-import { runLocalInference, initModels } from "@/engine/local-inference";
-import type { AnomalyScore } from "@/engine/onnx-model-manager";
+import type { EndpointSnapshot } from "@/types/endpoint";
+import { runLocalInference, initModels, type TransformerPipelineResult } from "@/engine/local-inference";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-interface AugmentedResult extends DiagnosisResult {
-  mlAugmented?: boolean;
-  anomalyScore?: AnomalyScore;
+interface AugmentedResult extends TransformerPipelineResult {
   aiPowered?: boolean;
 }
 
@@ -29,7 +26,7 @@ async function runDeepAI(snapshot: EndpointSnapshot): Promise<AugmentedResult | 
     }
 
     if (data?.result) {
-      return { ...data.result, aiPowered: true };
+      return { ...data.result, aiPowered: true, transformerPowered: false };
     }
 
     return null;
@@ -60,7 +57,6 @@ export function useDiagnosis() {
       const start = performance.now();
 
       if (mode === "deep") {
-        // Try AI-powered deep analysis first
         toast.info("Running AI-powered deep analysis...");
         const aiResult = await runDeepAI(snapshot);
 
@@ -72,16 +68,14 @@ export function useDiagnosis() {
           return aiResult;
         }
 
-        // Fallback to local engine
-        toast.info("AI unavailable — falling back to local engine");
+        toast.info("AI unavailable — falling back to local transformers");
       }
 
-      // Quick mode or fallback: local rules + ONNX
       const data = await runLocalInference(snapshot, { mode });
       const elapsed = Math.round(performance.now() - start);
       setLatencyMs(elapsed);
       setResult(data);
-      const engine = data.mlAugmented ? "rules + ONNX ML" : "rules engine";
+      const engine = data.transformerPowered ? "transformer pipeline" : "rules engine";
       toast.success(`Diagnosis complete in ${elapsed}ms (${engine})`);
       return data;
     } catch (e) {
