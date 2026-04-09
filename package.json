@@ -12,7 +12,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "electron:dev": "npm run build && electron .",
+    "package:win": "npm run build && npx @electron/packager . EndpointDoctor --platform=win32 --arch=x64 --out=release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\"",
+    "package:mac": "npm run build && npx @electron/packager . EndpointDoctor --platform=darwin --arch=x64 --out=release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
