@@ -1,12 +1,42 @@
 import { useState, useEffect } from "react";
 import type { EndpointSnapshot, DiagnosisResult } from "@/types/endpoint";
-import { runLocalInference, initModels, areModelsAvailable } from "@/engine/local-inference";
+import { runLocalInference, initModels } from "@/engine/local-inference";
 import type { AnomalyScore } from "@/engine/onnx-model-manager";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 interface AugmentedResult extends DiagnosisResult {
   mlAugmented?: boolean;
   anomalyScore?: AnomalyScore;
+  aiPowered?: boolean;
+}
+
+async function runDeepAI(snapshot: EndpointSnapshot): Promise<AugmentedResult | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke("diagnose-deep", {
+      body: { snapshot },
+    });
+
+    if (error) {
+      console.warn("AI deep analysis failed:", error);
+      return null;
+    }
+
+    if (data?.error) {
+      console.warn("AI deep analysis error:", data.error);
+      toast.warning(data.error);
+      return null;
+    }
+
+    if (data?.result) {
+      return { ...data.result, aiPowered: true };
+    }
+
+    return null;
+  } catch (e) {
+    console.warn("AI deep analysis unavailable (offline?):", e);
+    return null;
+  }
 }
 
 export function useDiagnosis() {
@@ -16,7 +46,6 @@ export function useDiagnosis() {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [modelsReady, setModelsReady] = useState(false);
 
-  // Attempt to load ONNX models on mount
   useEffect(() => {
     initModels().then(ok => setModelsReady(ok));
   }, []);
@@ -29,6 +58,25 @@ export function useDiagnosis() {
 
     try {
       const start = performance.now();
+
+      if (mode === "deep") {
+        // Try AI-powered deep analysis first
+        toast.info("Running AI-powered deep analysis...");
+        const aiResult = await runDeepAI(snapshot);
+
+        if (aiResult) {
+          const elapsed = Math.round(performance.now() - start);
+          setLatencyMs(elapsed);
+          setResult(aiResult);
+          toast.success(`AI deep analysis complete in ${(elapsed / 1000).toFixed(1)}s`);
+          return aiResult;
+        }
+
+        // Fallback to local engine
+        toast.info("AI unavailable — falling back to local engine");
+      }
+
+      // Quick mode or fallback: local rules + ONNX
       const data = await runLocalInference(snapshot, { mode });
       const elapsed = Math.round(performance.now() - start);
       setLatencyMs(elapsed);
