@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios"
 import { isElectronApp, collectLiveTelemetry } from "@/engine/electron-telemetry";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck, RefreshCw, Pause,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,8 +28,40 @@ const Index = () => {
   const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
   const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
   const isElectron = useMemo(() => isElectronApp(), []);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const collectAndDiagnose = useCallback(async () => {
+    if (!isElectronApp()) return;
+    setIsScanning(true);
+    try {
+      const liveSnap = await collectLiveTelemetry();
+      setSnapshot(liveSnap);
+      await diagnose(liveSnap, "quick");
+    } catch (err) {
+      console.warn("Auto-refresh telemetry failed:", err);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [diagnose]);
+
+  useEffect(() => {
+    if (autoRefresh && activeScenario === "live") {
+      autoRefreshRef.current = setInterval(collectAndDiagnose, 30_000);
+      return () => {
+        if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+      };
+    } else {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+        autoRefreshRef.current = null;
+      }
+    }
+  }, [autoRefresh, activeScenario, collectAndDiagnose]);
+
+  // Turn off auto-refresh when leaving live mode
   const handleScenarioSelect = (key: ScenarioKey) => {
+    setAutoRefresh(false);
     setActiveScenario(key);
     if (key !== "custom") {
       const snap = generateSnapshot(key);
@@ -188,9 +220,23 @@ const Index = () => {
                 )}
               </div>
               {activeScenario === "live" && (
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
-                  🖥️ Real telemetry from {snapshot.hostname} ({snapshot.os} {snapshot.os_version})
-                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                    🖥️ Real telemetry from {snapshot.hostname} ({snapshot.os} {snapshot.os_version})
+                  </p>
+                  <button
+                    onClick={() => setAutoRefresh(prev => !prev)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md border text-[10px] transition-all flex items-center gap-1.5 font-medium",
+                      autoRefresh
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : "bg-card hover:bg-muted border-border text-muted-foreground"
+                    )}
+                  >
+                    {autoRefresh ? <Pause className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
+                    {autoRefresh ? "Auto-refresh ON (30s)" : "Auto-refresh"}
+                  </button>
+                </div>
               )}
               {activeScenario !== "custom" && activeScenario !== "live" && (
                 <p className="text-xs text-muted-foreground mt-2">
