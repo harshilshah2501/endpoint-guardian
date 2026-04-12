@@ -131,13 +131,39 @@ function getDiskInfo() {
 /** Memory info */
 function getMemoryInfo() {
   const totalMb = Math.round(os.totalmem() / 1048576);
-  const freeMb = Math.round(os.freemem() / 1048576);
-  const availPct = freeMb / totalMb;
+  let availableMb = Math.round(os.freemem() / 1048576);
+  let pressure = "normal";
 
   let swapMb = 0;
   const platform = process.platform;
   try {
     if (platform === "darwin") {
+      // Prefer macOS VM accounting over os.freemem() to avoid false "critical" memory pressure.
+      const vmRaw = safeExec("vm_stat");
+      if (vmRaw) {
+        const pageSizeMatch = vmRaw.match(/page size of\s+(\d+) bytes/i);
+        const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1], 10) : 4096;
+        const getPages = (label) => {
+          const m = vmRaw.match(new RegExp(`${label}:\\s+([\\d.]+)`));
+          if (!m) return 0;
+          return Math.round(parseFloat(m[1].replace(/\./g, "")));
+        };
+
+        const freePages = getPages("Pages free");
+        const inactivePages = getPages("Pages inactive");
+        const speculativePages = getPages("Pages speculative");
+        const purgeablePages = getPages("Pages purgeable");
+        const availablePages = freePages + inactivePages + speculativePages + purgeablePages;
+        availableMb = Math.round((availablePages * pageSize) / 1048576);
+      }
+
+      const pressureRaw = safeExec("memory_pressure -Q");
+      if (/critical/i.test(pressureRaw)) {
+        pressure = "critical";
+      } else if (/warning/i.test(pressureRaw)) {
+        pressure = "warning";
+      }
+
       const raw = safeExec("sysctl vm.swapusage");
       const match = raw.match(/used\s*=\s*([\d.]+)M/);
       if (match) swapMb = Math.round(parseFloat(match[1]));
@@ -148,9 +174,12 @@ function getMemoryInfo() {
     }
   } catch {}
 
-  const pressure = availPct < 0.05 ? "critical" : availPct < 0.15 ? "warning" : "normal";
+  if (pressure === "normal") {
+    const availPct = availableMb / totalMb;
+    pressure = availPct < 0.05 ? "critical" : availPct < 0.15 ? "warning" : "normal";
+  }
 
-  return { total_mb: totalMb, available_mb: freeMb, pressure, swap_usage_mb: swapMb };
+  return { total_mb: totalMb, available_mb: availableMb, pressure, swap_usage_mb: swapMb };
 }
 
 /** Network checks */
@@ -174,17 +203,7 @@ async function getNetworkInfo() {
     dns.resolve("google.com", (err) => resolve(!err));
   });
 
-  const gatewayReachable = await new Promise((resolve) => {
-    // Try to find default gateway
-    const gw = getDefaultGateway();
-    if (!gw) { resolve(true); return; } // assume OK
-    const sock = new net.Socket();
-    sock.setTimeout(2000);
-    sock.on("connect", () => { sock.destroy(); resolve(true); });
-    sock.on("error", () => resolve(false));
-    sock.on("timeout", () => { sock.destroy(); resolve(false); });
-    sock.connect(80, gw);
-  });
+  const gw = getDefaultGateway();
 
   const internetReachable = await new Promise((resolve) => {
     const sock = new net.Socket();
@@ -194,6 +213,9 @@ async function getNetworkInfo() {
     sock.on("timeout", () => { sock.destroy(); resolve(false); });
     sock.connect(443, "1.1.1.1");
   });
+
+  // Gateway probing via TCP/80 is noisy and often blocked by routers; infer from routing + internet checks.
+  const gatewayReachable = !!gw || internetReachable;
 
   // Get DNS server
   const servers = dns.getServers();
@@ -248,7 +270,8 @@ async function collectSnapshot() {
     services: [{ name: "EndpointDoctor", running: true, restart_count_1h: 0, exit_code: null }],
     crashes: { count_24h: 0, recent_apps: [] },
     updates: { pending_count: 0, last_update: new Date().toISOString() },
-    startup: { items_count: 0, boot_time_sec: Math.round(os.uptime()) },
+    // Do not misuse uptime as startup duration; this value should be sourced from actual startup instrumentation.
+    startup: { items_count: 0, boot_time_sec: null },
     battery: { health_pct: null, cycle_count: null, thermal_throttle: false },
   };
 }
