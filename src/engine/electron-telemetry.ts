@@ -2,6 +2,7 @@ import type { EndpointSnapshot } from "@/types/endpoint";
 
 interface ElectronAPI {
   collectTelemetry: () => Promise<EndpointSnapshot>;
+  notifyHealthChange: (data: { previousHealth: string; currentHealth: string; issues: string[] }) => void;
   isElectron: boolean;
 }
 
