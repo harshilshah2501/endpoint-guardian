@@ -92,15 +92,18 @@ EndpointDoctor uses `@electron/packager` to create standalone executables.
 ### macOS (Apple Silicon — M1/M2/M3)
 
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=darwin --arch=arm64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run package:mac:arm64
 ```
 
 Output: `electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app`
+
+To create a Finder-installable DMG from the current app bundle:
+
+```bash
+npm run package:mac:arm64:dmg
+```
+
+Output: `electron-release/EndpointDoctor-darwin-arm64.dmg`
 
 > **Gatekeeper:** The app is unsigned. Right-click → **Open** on first launch, or run:
 > ```bash
@@ -110,12 +113,13 @@ Output: `electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app`
 ### macOS (Intel)
 
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=darwin --arch=x64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run package:mac
+```
+
+To create an Intel DMG:
+
+```bash
+npm run package:mac:dmg
 ```
 
 ### Windows

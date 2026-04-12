@@ -158,18 +158,25 @@ async function getNetworkInfo() {
   const dns = require("dns");
   const net = require("net");
 
+  function getDefaultGateway() {
+    try {
+      if (process.platform === "linux") {
+        return safeExec("command -v ip >/dev/null 2>&1 && ip route 2>/dev/null | awk '/default/ {print $3; exit}'");
+      }
+      if (process.platform === "darwin") {
+        return safeExec("route -n get default 2>/dev/null | awk '/gateway/ {print $2; exit}'");
+      }
+    } catch {}
+    return "";
+  }
+
   const dnsOk = await new Promise((resolve) => {
     dns.resolve("google.com", (err) => resolve(!err));
   });
 
   const gatewayReachable = await new Promise((resolve) => {
     // Try to find default gateway
-    let gw = "";
-    try {
-      if (process.platform === "darwin" || process.platform === "linux") {
-        gw = safeExec("ip route | grep default | awk '{print $3}'") || safeExec("route -n get default 2>/dev/null | grep gateway | awk '{print $2}'");
-      }
-    } catch {}
+    const gw = getDefaultGateway();
     if (!gw) { resolve(true); return; } // assume OK
     const sock = new net.Socket();
     sock.setTimeout(2000);

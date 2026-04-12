@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   CheckCircle, AlertTriangle, XCircle, Shield, Zap, Activity,
   ChevronDown, ChevronUp, Brain, Search, UserCheck, Play, Undo2,
-  Cpu, ArrowRight,
+  Cpu, ArrowRight, MemoryStick, HardDrive, Wifi,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -72,10 +72,68 @@ const tierConfig: Record<ActionTier, {
   },
 };
 
+type DiagnosisCategory = "cpu" | "memory" | "disk" | "network" | "system";
+
+const categoryConfig: Record<DiagnosisCategory, {
+  label: string;
+  icon: typeof Cpu;
+  className: string;
+}> = {
+  cpu: {
+    label: "CPU",
+    icon: Cpu,
+    className: "border-red-500/20 bg-red-500/5",
+  },
+  memory: {
+    label: "RAM",
+    icon: MemoryStick,
+    className: "border-amber-500/20 bg-amber-500/5",
+  },
+  disk: {
+    label: "Disk",
+    icon: HardDrive,
+    className: "border-blue-500/20 bg-blue-500/5",
+  },
+  network: {
+    label: "Network",
+    icon: Wifi,
+    className: "border-cyan-500/20 bg-cyan-500/5",
+  },
+  system: {
+    label: "Multiple / System",
+    icon: Activity,
+    className: "border-violet-500/20 bg-violet-500/5",
+  },
+};
+
+function getDiagnosisCategory(issueClass: string): DiagnosisCategory {
+  switch (issueClass) {
+    case "high_cpu":
+      return "cpu";
+    case "high_memory":
+      return "memory";
+    case "low_disk":
+    case "disk_io":
+      return "disk";
+    case "network_dns":
+      return "network";
+    default:
+      return "system";
+  }
+}
+
 export function DiagnosisView({ result }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
   const [executedActions, setExecutedActions] = useState<Set<string>>(new Set());
   const HealthIcon = healthIcons[result.overall_health] || Activity;
+  const groupedDiagnoses = (Object.keys(categoryConfig) as DiagnosisCategory[])
+    .map((category) => ({
+      category,
+      items: result.diagnoses
+        .map((diag, index) => ({ diag, index }))
+        .filter(({ diag }) => getDiagnosisCategory(diag.issue_class) === category),
+    }))
+    .filter(({ items }) => items.length > 0);
 
   const handleAutoExecute = (actionKey: string, action: string) => {
     setExecutedActions(prev => new Set(prev).add(actionKey));
@@ -244,9 +302,27 @@ export function DiagnosisView({ result }: Props) {
         </CardContent>
       </Card>
 
-      {/* Individual diagnoses */}
-      {result.diagnoses.map((diag, i) => {
-        const expanded = expandedIdx === i;
+      {/* Individual diagnoses grouped by domain */}
+      {groupedDiagnoses.map(({ category, items }) => {
+        const cfg = categoryConfig[category];
+        const CategoryIcon = cfg.icon;
+
+        return (
+          <Card key={category} className={cn("border", cfg.className)}>
+            <CardHeader className="py-3 px-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CategoryIcon className="w-4 h-4 text-primary" />
+                  <CardTitle className="text-sm">{cfg.label}</CardTitle>
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  {items.length} issue{items.length !== 1 ? "s" : ""}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-4 pt-0 space-y-3">
+              {items.map(({ diag, index: i }) => {
+                const expanded = expandedIdx === i;
         const tierGroups = groupByTier(diag.remediations);
 
         return (
@@ -373,6 +449,10 @@ export function DiagnosisView({ result }: Props) {
                 )}
               </CardContent>
             )}
+          </Card>
+        );
+              })}
+            </CardContent>
           </Card>
         );
       })}

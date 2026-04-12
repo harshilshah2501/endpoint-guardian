@@ -14,8 +14,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "electron:dev": "npm run build && electron .",
+    "package:mac:arm64": "npm run build && npx @electron/packager . EndpointDoctor --platform=darwin --arch=arm64 --out=electron-release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\"",
+    "package:mac:dmg": "npm run package:mac && bash scripts/create-mac-dmg.sh electron-release/EndpointDoctor-darwin-x64/EndpointDoctor.app electron-release/EndpointDoctor-darwin-x64.dmg",
+    "package:mac:arm64:dmg": "npm run package:mac:arm64 && bash scripts/create-mac-dmg.sh electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app electron-release/EndpointDoctor-darwin-arm64.dmg",
     "package:win": "npm run build && npx @electron/packager . EndpointDoctor --platform=win32 --arch=x64 --out=release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\"",
-    "package:mac": "npm run build && npx @electron/packager . EndpointDoctor --platform=darwin --arch=x64 --out=release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\""
+    "package:mac": "npm run build && npx @electron/packager . EndpointDoctor --platform=darwin --arch=x64 --out=electron-release --overwrite --ignore=\"(node_modules/(?!onnxruntime-web)|^\\/src|^\\/supabase|^\\/scripts)\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

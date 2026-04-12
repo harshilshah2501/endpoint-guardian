@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useTheme } from "next-themes";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { IssueCatalog } from "@/components/IssueCatalog";
 import { SafetyMatrix } from "@/components/SafetyMatrix";
 import { Roadmap } from "@/components/Roadmap";
@@ -10,27 +12,47 @@ import { SnapshotViewer } from "@/components/SnapshotViewer";
 import { DiagnosisView } from "@/components/DiagnosisView";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
 import { getEngineInfo } from "@/engine/local-inference";
-import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios";
+import { generateSnapshot } from "@/data/scenarios";
 import { isElectronApp, collectLiveTelemetry } from "@/engine/electron-telemetry";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck, RefreshCw, Pause,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, Cpu, Wifi, MonitorCheck, RefreshCw, Pause, Moon, Sun, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
+const APP_VERSION = __APP_VERSION__;
+
 const Index = () => {
-  const [activeScenario, setActiveScenario] = useState<ScenarioKey | "live">("high_cpu");
-  const [customJson, setCustomJson] = useState("");
-  const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
+  const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot(isElectronApp() ? "healthy" : "high_cpu"));
   const [isScanning, setIsScanning] = useState(false);
+  const [isBootstrappingLive, setIsBootstrappingLive] = useState(() => isElectronApp());
   const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
   const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
   const isElectron = useMemo(() => isElectronApp(), []);
+  const { resolvedTheme, setTheme } = useTheme();
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [telemetryExpanded, setTelemetryExpanded] = useState(true);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastHealthRef = useRef<string>("healthy");
+
+  const loadLiveTelemetry = useCallback(async (showToast = true) => {
+    if (!isElectronApp()) return;
+    setIsScanning(true);
+    clearResult();
+    try {
+      const liveSnap = await collectLiveTelemetry();
+      setSnapshot(liveSnap);
+      if (showToast) toast.success("Live telemetry collected from this Mac");
+    } catch (err) {
+      if (showToast) {
+        toast.error("Live scan failed: " + (err instanceof Error ? err.message : "Unknown error"));
+      }
+    } finally {
+      setIsScanning(false);
+      setIsBootstrappingLive(false);
+    }
+  }, [clearResult]);
 
   const collectAndDiagnose = useCallback(async () => {
     if (!isElectronApp()) return;
@@ -59,7 +81,7 @@ const Index = () => {
   }, [diagnose]);
 
   useEffect(() => {
-    if (autoRefresh && activeScenario === "live") {
+    if (autoRefresh && isElectron) {
       autoRefreshRef.current = setInterval(collectAndDiagnose, 30_000);
       return () => {
         if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
@@ -70,42 +92,21 @@ const Index = () => {
         autoRefreshRef.current = null;
       }
     }
-  }, [autoRefresh, activeScenario, collectAndDiagnose]);
+  }, [autoRefresh, isElectron, collectAndDiagnose]);
 
-  // Turn off auto-refresh when leaving live mode
-  const handleScenarioSelect = (key: ScenarioKey) => {
-    setAutoRefresh(false);
-    setActiveScenario(key);
-    if (key !== "custom") {
-      const snap = generateSnapshot(key);
-      setSnapshot(snap);
-      clearResult();
+  useEffect(() => {
+    if (!isElectron || !isBootstrappingLive) return;
+    void loadLiveTelemetry(false);
+  }, [isElectron, isBootstrappingLive, loadLiveTelemetry]);
+
+  useEffect(() => {
+    if (result) {
+      setTelemetryExpanded(false);
     }
-  };
+  }, [result]);
 
   const handleLiveScan = async () => {
-    setActiveScenario("live");
-    setIsScanning(true);
-    clearResult();
-    try {
-      const liveSnap = await collectLiveTelemetry();
-      setSnapshot(liveSnap);
-      toast.success("Live telemetry collected from this machine");
-    } catch (err) {
-      toast.error("Live scan failed: " + (err instanceof Error ? err.message : "Unknown error"));
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  const handleCustomApply = () => {
-    try {
-      const parsed = JSON.parse(customJson);
-      setSnapshot(parsed);
-      clearResult();
-    } catch {
-      // invalid JSON
-    }
+    await loadLiveTelemetry(true);
   };
 
   const handleDiagnose = (mode: "quick" | "deep") => {
@@ -123,9 +124,21 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-lg font-bold tracking-tight">EndpointDoctor</h1>
-              <p className="text-[11px] text-muted-foreground">Edge AI Diagnostic Engine — Fully Local, Zero Cloud</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-[11px] text-muted-foreground">Edge AI Diagnostic Engine — Fully Local, Zero Cloud</p>
+                <Badge variant="outline" className="text-[10px] font-mono">v{APP_VERSION}</Badge>
+              </div>
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+                className="h-8 gap-1.5 text-[11px]"
+              >
+                {resolvedTheme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                {resolvedTheme === "dark" ? "Light" : "Dark"}
+              </Button>
               <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
                 <Wifi className="w-3 h-3 mr-1 line-through" /> Offline-Ready
               </Badge>
@@ -144,24 +157,15 @@ const Index = () => {
 
       <main className="max-w-7xl mx-auto px-4 py-5">
         <Tabs defaultValue="diagnose" className="space-y-5">
-          <TabsList className="grid w-full grid-cols-4 max-w-xl">
+          <TabsList className="grid w-full grid-cols-2 max-w-sm">
             <TabsTrigger value="diagnose" className="flex items-center gap-1.5 text-xs">
               <Brain className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Diagnostics</span>
               <span className="sm:hidden">Diagnose</span>
             </TabsTrigger>
-            <TabsTrigger value="issues" className="flex items-center gap-1.5 text-xs">
-              <Bug className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Issue Catalog</span>
-              <span className="sm:hidden">Issues</span>
-            </TabsTrigger>
-            <TabsTrigger value="safety" className="flex items-center gap-1.5 text-xs">
-              <Shield className="w-3.5 h-3.5" />
-              Safety
-            </TabsTrigger>
-            <TabsTrigger value="roadmap" className="flex items-center gap-1.5 text-xs">
+            <TabsTrigger value="reference" className="flex items-center gap-1.5 text-xs">
               <Map className="w-3.5 h-3.5" />
-              Roadmap
+              Reference
             </TabsTrigger>
           </TabsList>
 
@@ -180,113 +184,68 @@ const Index = () => {
               </CardContent>
             </Card>
 
-            {/* Scenario selector */}
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
-                <FlaskConical className="w-3.5 h-3.5" /> Select Scenario
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {scenarios.map((s) => (
-                  <button
-                    key={s.key}
-                    onClick={() => handleScenarioSelect(s.key)}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg border text-xs transition-all",
-                      activeScenario === s.key
-                        ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                        : "bg-card hover:bg-muted border-border"
-                    )}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-                <button
-                  onClick={() => handleScenarioSelect("custom")}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg border text-xs transition-all",
-                    activeScenario === "custom"
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-card hover:bg-muted border-border"
-                  )}
-                >
-                  Custom JSON
-                </button>
-                {isElectron && (
-                  <button
-                    onClick={handleLiveScan}
-                    disabled={isScanning}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg border text-xs transition-all flex items-center gap-1.5 font-semibold",
-                      activeScenario === "live"
-                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                        : "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-                    )}
-                  >
-                    {isScanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <MonitorCheck className="w-3 h-3" />}
-                    {isScanning ? "Scanning..." : "⚡ Live Scan"}
-                  </button>
-                )}
-                {!isElectron && (
-                  <span className="px-3 py-1.5 rounded-lg border border-dashed border-muted-foreground/30 text-xs text-muted-foreground italic">
-                    Live Scan available in desktop app
-                  </span>
-                )}
-              </div>
-              {activeScenario === "live" && (
-                <div className="flex items-center gap-3 mt-2">
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                    🖥️ Real telemetry from {snapshot.hostname} ({snapshot.os} {snapshot.os_version})
+            <Card className="border-primary/15 bg-primary/5">
+              <CardContent className="p-4 flex flex-wrap items-center gap-3">
+                <div className="mr-auto">
+                  <p className="text-sm font-medium">Host Diagnostics</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This screen uses only live telemetry from the current machine and groups it into CPU, Memory, Disk, Network, and overall system health.
                   </p>
-                  <button
-                    onClick={() => setAutoRefresh(prev => !prev)}
-                    className={cn(
-                      "px-2.5 py-1 rounded-md border text-[10px] transition-all flex items-center gap-1.5 font-medium",
-                      autoRefresh
-                        ? "bg-emerald-600 text-white border-emerald-600"
-                        : "bg-card hover:bg-muted border-border text-muted-foreground"
-                    )}
-                  >
-                    {autoRefresh ? <Pause className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
-                    {autoRefresh ? "Auto-refresh ON (30s)" : "Auto-refresh"}
-                  </button>
                 </div>
-              )}
-              {activeScenario !== "custom" && activeScenario !== "live" && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  {scenarios.find(s => s.key === activeScenario)?.description}
-                </p>
-              )}
-            </div>
-
-            {/* Custom JSON */}
-            {activeScenario === "custom" && (
-              <Card>
-                <CardContent className="p-4 space-y-3">
-                  <Textarea
-                    value={customJson}
-                    onChange={(e) => setCustomJson(e.target.value)}
-                    placeholder="Paste endpoint snapshot JSON here..."
-                    className="font-mono text-xs h-40"
-                  />
-                  <Button size="sm" onClick={handleCustomApply}>Apply Snapshot</Button>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Snapshot view */}
-            <SnapshotViewer snapshot={snapshot} />
+                {isElectron ? (
+                  <>
+                    <Badge variant="outline" className="text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                      {isBootstrappingLive ? "Connecting to this Mac..." : `Live: ${snapshot.hostname}`}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleLiveScan}
+                      disabled={isScanning || isBootstrappingLive}
+                      className="h-8 gap-1.5"
+                    >
+                      {isScanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MonitorCheck className="w-3.5 h-3.5" />}
+                      {isScanning ? "Refreshing..." : "Refresh Telemetry"}
+                    </Button>
+                    <button
+                      onClick={() => setAutoRefresh(prev => !prev)}
+                      disabled={isBootstrappingLive}
+                      className={cn(
+                        "px-2.5 py-1.5 rounded-md border text-[11px] transition-all flex items-center gap-1.5 font-medium",
+                        autoRefresh
+                          ? "bg-emerald-600 text-white border-emerald-600"
+                          : "bg-card hover:bg-muted border-border text-muted-foreground"
+                      )}
+                    >
+                      {autoRefresh ? <Pause className="w-3 h-3" /> : <RefreshCw className="w-3 h-3" />}
+                      {autoRefresh ? "Auto-refresh ON" : "Auto-refresh"}
+                    </button>
+                  </>
+                ) : (
+                  <Badge variant="outline" className="text-[10px]">
+                    Live telemetry available in Electron desktop app
+                  </Badge>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Diagnose buttons */}
-            <div className="flex items-center gap-3">
-              <Button onClick={() => handleDiagnose("quick")} disabled={isLoading} className="gap-2">
+            <div className="rounded-xl border bg-card p-3 flex flex-wrap items-center gap-3">
+              <div className="mr-auto">
+                <p className="text-sm font-medium">Diagnose this Mac</p>
+                <p className="text-xs text-muted-foreground">
+                  Use this for real troubleshooting on the current host. Results correlate issues across CPU, RAM, Disk, Network, and system health signals.
+                </p>
+              </div>
+              <Button onClick={() => handleDiagnose("quick")} disabled={isLoading || isBootstrappingLive} className="gap-2">
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                 Quick Diagnosis
               </Button>
-              <Button onClick={() => handleDiagnose("deep")} disabled={isLoading} variant="outline" className="gap-2">
+              <Button onClick={() => handleDiagnose("deep")} disabled={isLoading || isBootstrappingLive} variant="outline" className="gap-2">
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
                 Deep Analysis
               </Button>
-              {isLoading && <span className="text-xs text-muted-foreground animate-pulse">Running local diagnostics...</span>}
+              {(isLoading || isBootstrappingLive) && <span className="text-xs text-muted-foreground animate-pulse">{isBootstrappingLive ? "Loading this Mac's telemetry..." : "Running local diagnostics..."}</span>}
             </div>
 
             {/* Error */}
@@ -298,11 +257,75 @@ const Index = () => {
 
             {/* Results */}
             {result && <DiagnosisView result={result} />}
+
+            {/* Snapshot view */}
+            <Collapsible open={telemetryExpanded} onOpenChange={setTelemetryExpanded}>
+              <Card>
+                <CardContent className="p-0">
+                  <div className="p-4 flex flex-wrap items-center gap-3 border-b bg-muted/20">
+                    <div className="mr-auto">
+                      <p className="text-sm font-medium">Telemetry Details</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Raw host signals grouped by CPU, RAM, Disk, Network, and system health.
+                      </p>
+                    </div>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-1.5">
+                        {telemetryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        {telemetryExpanded ? "Hide telemetry" : "Show telemetry"}
+                      </Button>
+                    </CollapsibleTrigger>
+                  </div>
+                  <CollapsibleContent>
+                    <div className="p-4">
+                      {isBootstrappingLive ? (
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Collecting live telemetry from your Mac...
+                        </div>
+                      ) : (
+                        <SnapshotViewer snapshot={snapshot} />
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </CardContent>
+              </Card>
+            </Collapsible>
           </TabsContent>
 
-          <TabsContent value="issues"><IssueCatalog /></TabsContent>
-          <TabsContent value="safety"><SafetyMatrix /></TabsContent>
-          <TabsContent value="roadmap"><Roadmap /></TabsContent>
+          <TabsContent value="reference">
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <div>
+                  <p className="text-sm font-medium">Reference Library</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Supporting material for understanding issue classes, remediation safety, and planned product direction.
+                  </p>
+                </div>
+
+                <Tabs defaultValue="issues" className="space-y-4">
+                  <TabsList className="grid w-full grid-cols-3 max-w-md">
+                    <TabsTrigger value="issues" className="flex items-center gap-1.5 text-xs">
+                      <Bug className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Issue Catalog</span>
+                      <span className="sm:hidden">Issues</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="safety" className="flex items-center gap-1.5 text-xs">
+                      <Shield className="w-3.5 h-3.5" />
+                      Safety
+                    </TabsTrigger>
+                    <TabsTrigger value="roadmap" className="flex items-center gap-1.5 text-xs">
+                      <Map className="w-3.5 h-3.5" />
+                      Roadmap
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="issues"><IssueCatalog /></TabsContent>
+                  <TabsContent value="safety"><SafetyMatrix /></TabsContent>
+                  <TabsContent value="roadmap"><Roadmap /></TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </main>
     </div>
