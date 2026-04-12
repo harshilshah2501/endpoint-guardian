@@ -1,5 +1,4 @@
 import type { EndpointSnapshot, DiagnosisResult } from "@/types/endpoint";
-import { issues } from "@/data/issues";
 import { runLocalDiagnosis } from "./rules-engine";
 import {
   modelManager,
@@ -114,22 +113,20 @@ export function getEngineInfo() {
     .filter(([, s]) => s.loaded)
     .map(([name]) => name);
 
-  const hasLoadError = Object.values(status).some(s => s.error);
-
   return {
-    name: "EndpointDoctor Diagnostic Engine",
+    name: "EndpointDoctor Transformer Engine",
     version: "2.0.0",
     mode: loadedModels.length > 0
-      ? `Rules + ONNX (${loadedModels.length} model${loadedModels.length > 1 ? "s" : ""})`
-      : "Rules catalog only",
+      ? `Rules Engine + ${loadedModels.length} Transformer Model${loadedModels.length > 1 ? "s" : ""}`
+      : "Deterministic Rules Engine",
     modelStatus: loadedModels.length > 0
-      ? `ONNX loaded: ${loadedModels.join(", ")}`
+      ? `Loaded: ${loadedModels.join(", ")}`
       : Object.values(status).some(s => s.loading)
-        ? "Loading ONNX models…"
-        : hasLoadError
-          ? "ONNX unavailable (see error below)"
-          : "ONNX not loaded — rules-only run",
-    issuesCovered: issues.length,
+        ? "Loading transformer models..."
+        : Object.values(status).some(s => s.error)
+          ? `Models unavailable`
+          : "Rules-only (no transformer models)",
+    issuesCovered: 10,
     capabilities: [
       "High CPU detection & process attribution",
       "Memory pressure analysis",

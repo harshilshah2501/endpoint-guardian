@@ -9,12 +9,12 @@ import { Roadmap } from "@/components/Roadmap";
 import { SnapshotViewer } from "@/components/SnapshotViewer";
 import { DiagnosisView } from "@/components/DiagnosisView";
 import { useDiagnosis } from "@/hooks/use-diagnosis";
-import { getEngineInfo, getModelLoadError } from "@/engine/local-inference";
+import { getEngineInfo } from "@/engine/local-inference";
 import { scenarios, generateSnapshot, type ScenarioKey } from "@/data/scenarios";
 import { isElectronApp, collectLiveTelemetry } from "@/engine/electron-telemetry";
 import type { EndpointSnapshot } from "@/types/endpoint";
 import {
-  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck, RefreshCw,
+  Stethoscope, Bug, Shield, Map, Brain, Loader2, Zap, FlaskConical, Cpu, Wifi, MonitorCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,19 +25,8 @@ const Index = () => {
   const [customJson, setCustomJson] = useState("");
   const [snapshot, setSnapshot] = useState<EndpointSnapshot>(() => generateSnapshot("high_cpu"));
   const [isScanning, setIsScanning] = useState(false);
-  const {
-    diagnose,
-    isLoading,
-    isReloadingModels,
-    result,
-    error,
-    latencyMs,
-    clearResult,
-    modelsReady,
-    retryModelLoad,
-  } = useDiagnosis();
-  const engineInfo = useMemo(() => getEngineInfo(), [modelsReady, result, isLoading]);
-  const modelLoadError = useMemo(() => getModelLoadError(), [modelsReady, result, isLoading]);
+  const { diagnose, isLoading, result, error, latencyMs, clearResult, modelsReady } = useDiagnosis();
+  const engineInfo = useMemo(() => getEngineInfo(), [modelsReady]);
   const isElectron = useMemo(() => isElectronApp(), []);
 
   const handleScenarioSelect = (key: ScenarioKey) => {
@@ -135,41 +124,13 @@ const Index = () => {
           <TabsContent value="diagnose" className="space-y-5">
             {/* Engine info bar */}
             <Card className="bg-muted/30">
-              <CardContent className="p-3 space-y-2 text-xs">
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-                  <span className="font-medium">{engineInfo.name} v{engineInfo.version}</span>
-                  <span className="text-muted-foreground">{engineInfo.mode}</span>
-                  <span className="text-muted-foreground">
-                    {engineInfo.issuesCovered} issue classes (rules catalog)
-                  </span>
-                  <span className="text-muted-foreground">{engineInfo.modelStatus}</span>
-                  {latencyMs !== null && (
-                    <span className="ml-auto font-mono text-emerald-600 dark:text-emerald-400">⚡ {latencyMs}ms</span>
-                  )}
-                </div>
-                {modelLoadError && (
-                  <div className="space-y-2">
-                    <p className="text-amber-700 dark:text-amber-400 border-l-2 border-amber-500 pl-2">
-                      {modelLoadError}
-                      {" "}
-                      <span className="text-muted-foreground">
-                        Add ONNX files under <code className="text-[10px]">public/models/</code> and rebuild, or run the
-                        generator scripts in <code className="text-[10px]">scripts/</code>.
-                      </span>
-                    </p>
-                    <div className="pl-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void retryModelLoad()}
-                        disabled={isReloadingModels}
-                        className="h-7 text-[11px]"
-                      >
-                        {isReloadingModels ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-                        {isReloadingModels ? "Retrying..." : "Retry Model Load"}
-                      </Button>
-                    </div>
-                  </div>
+              <CardContent className="p-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+                <span className="font-medium">{engineInfo.name} v{engineInfo.version}</span>
+                <span className="text-muted-foreground">{engineInfo.mode}</span>
+                <span className="text-muted-foreground">{engineInfo.issuesCovered} issue classes</span>
+                <span className="text-muted-foreground">{engineInfo.modelStatus}</span>
+                {latencyMs !== null && (
+                  <span className="ml-auto font-mono text-emerald-600 dark:text-emerald-400">⚡ {latencyMs}ms</span>
                 )}
               </CardContent>
             </Card>

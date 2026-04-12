@@ -166,11 +166,8 @@ async function getNetworkInfo() {
     // Try to find default gateway
     let gw = "";
     try {
-      if (process.platform === "linux") {
-        gw = safeExec("ip route | grep default | awk '{print $3}'");
-      }
-      if (process.platform === "darwin" || (process.platform === "linux" && !gw)) {
-        gw = gw || safeExec("route -n get default 2>/dev/null | grep gateway | awk '{print $2}'");
+      if (process.platform === "darwin" || process.platform === "linux") {
+        gw = safeExec("ip route | grep default | awk '{print $3}'") || safeExec("route -n get default 2>/dev/null | grep gateway | awk '{print $2}'");
       }
     } catch {}
     if (!gw) { resolve(true); return; } // assume OK

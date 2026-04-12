@@ -7,11 +7,7 @@ import * as ort from "onnxruntime-web";
 import type { EndpointSnapshot } from "@/types/endpoint";
 
 ort.env.wasm.numThreads = 1;
-// Explicit backend locations for Vite dev and packaged Electron builds.
-const ortWasmBasePath = import.meta.env.DEV
-  ? "/node_modules/onnxruntime-web/dist/"
-  : "./assets/node_modules/onnxruntime-web/dist/";
-ort.env.wasm.wasmPaths = ortWasmBasePath;
+ort.env.wasm.wasmPaths = "./";
 
 export type ModelName = "anomaly_clf" | "causal_ranker" | "remediation_selector";
 
@@ -115,11 +111,6 @@ class MultiModelManager {
   private resetIdleTimer(name: ModelName) {
     const slot = this.slots[name];
     if (slot.idleTimer) clearTimeout(slot.idleTimer);
-    // Keep anomaly classifier loaded for the session — it backs Quick Scan and the engine status bar.
-    if (name === "anomaly_clf") {
-      slot.idleTimer = null;
-      return;
-    }
     slot.idleTimer = setTimeout(() => this.unload(name), IDLE_TIMEOUT_MS);
   }
 
