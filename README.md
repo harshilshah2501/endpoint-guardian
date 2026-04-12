@@ -148,6 +148,43 @@ Output: `electron-release/EndpointDoctor-linux-x64/`
 
 ---
 
+## ⚡ Inference Pipeline
+
+Every diagnosis runs through a layered pipeline that combines deterministic rules with transformer models:
+
+### Stage 1 — Rules Engine (always runs, <1ms)
+
+A hand-crafted rules engine evaluates all 12 telemetry features against known thresholds. This guarantees instant, explainable diagnostics even if models fail to load. Covers 10 issue classes: high CPU, memory pressure, low disk, DNS/gateway/internet failures, app crashes, startup slowdowns, service health, thermals, and disk I/O.
+
+### Stage 2 — Anomaly Classifier (~50–100ms)
+
+A 2-layer transformer encoder processes the 12-feature telemetry vector as a token sequence. Self-attention learns which feature *combinations* signal trouble (e.g., high CPU + thermal throttling). Outputs:
+- **4-class health probability:** healthy / degraded / warning / critical
+- **Per-feature anomaly scores:** highlights which metrics are driving the classification
+
+The ML layer can *upgrade* severity beyond what rules alone detect — catching subtle multi-signal patterns.
+
+### Stage 3 — Causal Ranker (~100–150ms, deep mode only)
+
+A cross-attention model builds a **causal adjacency matrix** — attention weights directly encode which signal drives which. No post-hoc explainability needed; the attention *is* the explanation.
+
+Example output: `high_cpu → thermal_throttle (87%)`, `low_disk → app_crash (72%)`
+
+### Stage 4 — Remediation Selector (~50–100ms, deep mode only)
+
+A 1-layer transformer with a classification head ranks 8 remediation actions (kill process, clear cache, restart service, flush DNS, update system, reduce startup, free disk, investigate logs) with per-action confidence and tier classification (diagnostic / basic / advanced).
+
+### Mode Summary
+
+| Mode | Stages | Typical Latency | Use Case |
+|------|--------|-----------------|----------|
+| **Quick Scan** | Rules + Anomaly Clf | **50–100ms** | Real-time tray monitoring, instant triage |
+| **Deep Analysis** | Rules + All 3 Models | **300–500ms** | Full root-cause analysis with remediation plan |
+
+All models run via ONNX Runtime WASM (single-threaded). Models are lazy-loaded on first use and auto-unloaded after 60 seconds of idle time to conserve RAM.
+
+---
+
 ## 🤖 Transformer Models
 
 Three ONNX models live in `public/models/` and are bundled into `dist/models/` at build time:
