@@ -16,6 +16,34 @@ ipcMain.handle("collect-telemetry", async () => {
   return await collectSnapshot();
 });
 
+// IPC handler for renderer-driven health change notifications
+ipcMain.on("health-state-changed", (_event, { previousHealth, currentHealth, issues }) => {
+  if (currentHealth === previousHealth) return;
+
+  // Update tray
+  updateTrayMenu(currentHealth, issues || []);
+  lastHealth = currentHealth;
+
+  // Desktop notification on degradation
+  if (currentHealth === "critical" && previousHealth !== "critical") {
+    new Notification({
+      title: "EndpointDoctor — Critical Issue Detected",
+      body: (issues && issues.length > 0) ? issues.join(", ") : "System health is critical",
+      urgency: "critical",
+    }).show();
+  } else if (currentHealth === "degraded" && previousHealth === "healthy") {
+    new Notification({
+      title: "EndpointDoctor — Performance Degraded",
+      body: (issues && issues.length > 0) ? issues.join(", ") : "System performance has degraded",
+    }).show();
+  } else if (currentHealth === "healthy" && previousHealth !== "healthy") {
+    new Notification({
+      title: "EndpointDoctor — Recovered",
+      body: "All systems back to normal",
+    }).show();
+  }
+});
+
 // ─── Health assessment (lightweight, runs in background) ───
 function assessHealth(snapshot) {
   let health = "healthy";
