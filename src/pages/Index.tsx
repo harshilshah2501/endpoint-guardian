@@ -30,6 +30,7 @@ const Index = () => {
   const isElectron = useMemo(() => isElectronApp(), []);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastHealthRef = useRef<string>("healthy");
 
   const collectAndDiagnose = useCallback(async () => {
     if (!isElectronApp()) return;
@@ -37,7 +38,19 @@ const Index = () => {
     try {
       const liveSnap = await collectLiveTelemetry();
       setSnapshot(liveSnap);
-      await diagnose(liveSnap, "quick");
+      const diagResult = await diagnose(liveSnap, "quick");
+
+      // Notify main process on health state change
+      if (diagResult && diagResult.overall_health !== lastHealthRef.current) {
+        const previousHealth = lastHealthRef.current;
+        lastHealthRef.current = diagResult.overall_health;
+        const issues = diagResult.diagnoses.map(d => d.title);
+        window.electronAPI?.notifyHealthChange({
+          previousHealth,
+          currentHealth: diagResult.overall_health,
+          issues,
+        });
+      }
     } catch (err) {
       console.warn("Auto-refresh telemetry failed:", err);
     } finally {
