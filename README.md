@@ -61,7 +61,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Select a scenario from the dropdown and click **Quick Scan** or **Deep Analysis**.
+Open [http://localhost:8080](http://localhost:8080). Select a scenario and click **Quick Diagnosis** or **Deep Analysis**.
 
 ### Electron Desktop App
 
@@ -80,6 +80,20 @@ The desktop app adds:
 
 ---
 
+## 🧭 Documentation Hub
+
+Comprehensive usage and internals documentation now lives under `docs/`:
+
+- `docs/README.md` — entry point
+- `docs/TOUR.md` — end-to-end product walkthrough
+- `docs/SCENARIOS.md` — top 20 covered scenarios with detection paths
+- `docs/ARCHITECTURE.md` — detailed system internals and data flow
+- `docs/AI_FEATURES.md` — transformer/AI features and execution details
+- `docs/VALIDATION_PLAYBOOK.md` — deterministic scenario validation with expected outputs
+- `docs/USP.md` — product differentiators and concrete AI footprint/size profile
+
+---
+
 ## 📦 Packaging for Distribution
 
 EndpointDoctor uses `@electron/packager` to create standalone executables.
@@ -92,15 +106,10 @@ EndpointDoctor uses `@electron/packager` to create standalone executables.
 ### macOS (Apple Silicon — M1/M2/M3)
 
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=darwin --arch=arm64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run package:mac:arm64
 ```
 
-Output: `electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app`
+This keeps `onnxruntime-web` in `node_modules` (required at runtime) while omitting most other dependencies. Output: `electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app`
 
 > **Gatekeeper:** The app is unsigned. Right-click → **Open** on first launch, or run:
 > ```bash
@@ -110,38 +119,27 @@ Output: `electron-release/EndpointDoctor-darwin-arm64/EndpointDoctor.app`
 ### macOS (Intel)
 
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=darwin --arch=x64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run package:mac
 ```
+
+Output: `release/EndpointDoctor-darwin-x64/EndpointDoctor.app` (see `package.json` `package:mac` for flags).
 
 ### Windows
 
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=win32 --arch=x64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run package:win
 ```
 
-Output: `electron-release/EndpointDoctor-win32-x64/EndpointDoctor.exe`
+Output: `release/EndpointDoctor-win32-x64/EndpointDoctor.exe`
 
 > **Note:** This produces a portable folder, not an `.msi` installer. Double-click `EndpointDoctor.exe` inside the output folder to launch. For a setup wizard, use [Inno Setup](https://jrsoftware.org/isinfo.php) or [NSIS](https://nsis.sourceforge.io/).
 
 ### Linux
 
+Use the same `--ignore` pattern as in `package:win` / `package:mac` (keep `node_modules/onnxruntime-web`, drop most other packages). Example:
+
 ```bash
-npm run build
-npx @electron/packager . "EndpointDoctor" \
-  --platform=linux --arch=x64 \
-  --out=electron-release --overwrite \
-  --ignore='node_modules' --ignore='^/src' --ignore='^/public' \
-  --ignore='^/electron-release' --ignore='^/scripts' --ignore='^/supabase'
+npm run build && npx @electron/packager . EndpointDoctor --platform=linux --arch=x64 --out=electron-release --overwrite --ignore="(node_modules/(?!onnxruntime-web)|^/src|^/supabase|^/scripts)"
 ```
 
 Output: `electron-release/EndpointDoctor-linux-x64/`

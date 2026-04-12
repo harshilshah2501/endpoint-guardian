@@ -38,6 +38,7 @@ async function runDeepAI(snapshot: EndpointSnapshot): Promise<AugmentedResult | 
 
 export function useDiagnosis() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isReloadingModels, setIsReloadingModels] = useState(false);
   const [result, setResult] = useState<AugmentedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
@@ -46,6 +47,27 @@ export function useDiagnosis() {
   useEffect(() => {
     initModels().then(ok => setModelsReady(ok));
   }, []);
+
+  const retryModelLoad = async () => {
+    setIsReloadingModels(true);
+    try {
+      const ok = await initModels();
+      setModelsReady(ok);
+      if (ok) {
+        toast.success("Local ONNX models loaded successfully");
+      } else {
+        toast.error("Model load failed — verify runtime assets and model files");
+      }
+      return ok;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error while loading models";
+      toast.error(msg);
+      setModelsReady(false);
+      return false;
+    } finally {
+      setIsReloadingModels(false);
+    }
+  };
 
   const diagnose = async (snapshot: EndpointSnapshot, mode: "quick" | "deep" = "quick") => {
     setIsLoading(true);
@@ -89,7 +111,8 @@ export function useDiagnosis() {
   };
 
   return {
-    diagnose, isLoading, result, error, latencyMs, modelsReady,
+    diagnose, isLoading, isReloadingModels, result, error, latencyMs, modelsReady,
+    retryModelLoad,
     clearResult: () => { setResult(null); setLatencyMs(null); },
   };
 }

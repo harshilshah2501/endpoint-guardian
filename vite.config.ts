@@ -20,8 +20,12 @@ export default defineConfig(({ mode }) => ({
     viteStaticCopy({
       targets: [
         {
-          src: "node_modules/onnxruntime-web/dist/*.wasm",
-          dest: ".",
+          src: "node_modules/onnxruntime-web/dist/ort-wasm*.wasm",
+          dest: "assets",
+        },
+        {
+          src: "node_modules/onnxruntime-web/dist/ort-wasm*.mjs",
+          dest: "assets",
         },
       ],
     }),
